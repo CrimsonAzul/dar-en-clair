@@ -1,0 +1,16 @@
+# Taux utilises par src/darenclair/tools/fiscal.py
+# A REMPLIR depuis le CGI 2026 (DGI) : ne rien recopier d'un blog.
+# Pour chaque valeur, noter l'article source et passer verifie a true.
+
+profit_immobilier:
+  taux: null              # CGI, art. ?
+  taux_minimum: null      # cotisation minimale sur le prix de cession, CGI art. ?
+  verifie: false
+
+frais_acquisition:
+  taux_enregistrement: null   # CGI, art. ?
+  taux_conservation: null     # tarif de la conservation fonciere
+  frais_fixes_conservation: null
+  taux_honoraires_notaire: null
+  taux_tva_honoraires: null
+  verifie: false

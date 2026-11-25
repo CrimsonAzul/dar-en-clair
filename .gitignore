@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Textes bruts telecharges (PDF lourds) : on garde seulement la liste des sources
+data/raw/*.pdf
+data/processed/*.jsonl
+!data/processed/.gitkeep
+
+# Resultats d'evaluation generes
+eval/results/
+
+web/node_modules/
+web/.next/
