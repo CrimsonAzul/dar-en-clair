@@ -1,4 +1,8 @@
-"""Fusion de classements par Reciprocal Rank Fusion (RRF)."""
+"""Fusion de classements par Reciprocal Rank Fusion (RRF, Cormack et al. 2009, k = 60).
+
+RRF n'utilise que les rangs : pas besoin de normaliser des scores BM25 et cosinus qui ne
+sont pas comparables. Prendre ~30 candidats par liste, fusionner, puis reranker les 30 premiers.
+"""
 
 from __future__ import annotations
 
