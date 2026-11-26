@@ -12,6 +12,14 @@ def test_accents_et_pluriels():
     assert tokeniser("années") == tokeniser("annee")
 
 
+def test_mots_composes():
+    assert raciniser("plusvalue") in tokeniser("les plus-values immobilières")
+    assert tokeniser("plus-value")[0] != tokeniser("moins-value")[0]
+    assert "6712" in tokeniser("la loi 67-12")
+    bm = BM25({"tpi": "Le profit foncier et la plus-value de cession.", "autre": "La valeur du bien."})
+    assert bm.search("plus-value")[0] == "tpi"
+
+
 def test_mots_vides_retires():
     assert tokeniser("le loyer de la maison") == [raciniser("loyer"), raciniser("maison")]
 

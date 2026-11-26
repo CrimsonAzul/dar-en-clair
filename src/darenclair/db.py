@@ -20,13 +20,14 @@ def inserer(conn, chunks: list[dict], embeddings) -> None:
     """chunks : dicts issus du JSONL ; embeddings : vecteurs bge-m3 de chunk.texte_index()."""
     lignes = [
         (c["id"], c["article_id"], c["loi"], c["article"], c["domaine"], c["edition"],
-         c["contexte"], c["texte"], e)
+         c["contexte"], c.get("langue", "fr"), c["texte"], e)
         for c, e in zip(chunks, embeddings, strict=True)
     ]
     with conn.cursor() as cur:
         cur.executemany(
-            """INSERT INTO chunks (id, article_id, loi, article, domaine, edition, contexte, texte, embedding)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """INSERT INTO chunks
+                   (id, article_id, loi, article, domaine, edition, contexte, langue, texte, embedding)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
                    texte = EXCLUDED.texte, contexte = EXCLUDED.contexte, embedding = EXCLUDED.embedding""",
             lignes,
@@ -37,7 +38,9 @@ def inserer(conn, chunks: list[dict], embeddings) -> None:
 def charger_chunks(conn) -> list[dict]:
     """Tous les chunks, pour construire l'index BM25 en memoire au demarrage."""
     with conn.cursor() as cur:
-        cur.execute("SELECT id, article_id, loi, article, domaine, edition, contexte, texte FROM chunks")
+        cur.execute(
+            "SELECT id, article_id, loi, article, domaine, edition, contexte, langue, texte FROM chunks"
+        )
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 

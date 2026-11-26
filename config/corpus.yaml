@@ -1,0 +1,47 @@
+# Textes du corpus. `python -m darenclair.ingest.corpus` decoupe tous ceux dont le PDF existe.
+# slug : prefixe des ids d'articles, a reutiliser tel quel dans eval/questions.jsonl.
+
+- fichier: loi_67-12.pdf
+  loi: Loi 67-12
+  slug: loi_67-12
+  domaine: location
+  edition: "2013, traduction non officielle verifiee en 2018"
+
+- fichier: loi_49-16.pdf
+  loi: Loi 49-16
+  slug: loi_49-16
+  domaine: location
+  edition: "2016"
+
+- fichier: loi_39-08.pdf
+  loi: Loi 39-08
+  slug: loi_39-08
+  domaine: vente
+  edition: "2011, version modifiee et completee"
+
+- fichier: loi_32-09.pdf
+  loi: Loi 32-09
+  slug: loi_32-09
+  domaine: vente
+  edition: "2011"
+
+- fichier: cgi_2026.pdf
+  loi: CGI 2026
+  slug: cgi_2026
+  domaine: fiscalite
+  edition: "2026"
+
+# Version consolidee 2021 (modifiee par la loi 07-20), disponible seulement en arabe.
+# loi_47-06.pdf (francais, version d'origine de 2007, perimee) est garde mais pas indexe.
+- fichier: loi_47-06ar.pdf
+  loi: Loi 47-06
+  slug: loi_47-06
+  domaine: fiscalite
+  langue: ar
+  edition: "2021, version consolidee (loi 07-20), texte arabe"
+
+- fichier: loi_18-00.pdf
+  loi: Loi 18-00
+  slug: loi_18-00
+  domaine: copropriete
+  edition: "2016, modifiee par la loi 106-12"

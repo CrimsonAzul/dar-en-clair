@@ -53,8 +53,56 @@ def test_preambule_et_parasites_ignores():
     assert c[2].texte == "Disposition ajoutee."
 
 
-def test_cesure():
-    assert nettoyer("le loca-\ntaire paie") == "le locataire paie"
+def test_cesure_et_ligatures():
+    assert nettoyer("les plus-\nvalues ci-\n dessus") == "les plus-values ci-dessus"
+    assert nettoyer("déﬁnies") == "définies"
+
+
+def test_formats_d_en_tete_reels():
+    texte = (
+        "Chapitre Premier : Dispositions generales\n"
+        "Article Premier\nPremier texte.\n"
+        "Article 4 2\nTexte avec appel de note.\n"
+        "Article 59 duodecies\nTexte latin.\n"
+        "Article 2 - Taxes au profit des communes\nTexte 47-06.\n"
+        "Article.127- Taxes recouvrees\nCoquille du texte source.\n"
+        "Article17\nPas un en-tete.\n"
+    )
+    c = split_articles(texte, "Loi 18-00", "copropriete", "2016", saut_renumerotation=0)
+    assert [x.article for x in c] == ["1", "4", "59 duodecies", "2", "127"]
+    assert c[0].contexte == "Chapitre Premier : Dispositions generales"
+    assert c[3].texte.startswith("Taxes au profit")
+
+
+def test_livre_et_section_premiere():
+    texte = "LIVRE PREMIER\nDes droits reels\nTITRE II\nDu loyer\nSection première. - Champ\nArticle 7\nTexte."
+    c = split_articles(texte, "Loi 39-08", "vente", "2011")
+    assert c[0].contexte == "LIVRE PREMIER : Des droits reels > TITRE II : Du loyer > Section première. - Champ"
+
+
+def test_appels_de_note_colles():
+    assert nettoyer("des immeubles bâtis1 tel") == "des immeubles bâtis tel"
+    assert nettoyer("De la copropriété18 : Section") == "De la copropriété : Section"
+    assert nettoyer("non immatriculés.3") == "non immatriculés."
+    # a ne pas toucher : unites, nombres, references
+    assert nettoyer("une surface de 120 m2 au taux de 1.5") == "une surface de 120 m2 au taux de 1.5"
+    assert nettoyer("loi n° 18-00 et Mouharam1435") == "loi n° 18-00 et Mouharam1435"
+
+
+def test_preface_annexes_et_abroges():
+    lignes = ["Note de presentation.", "ARTICLE 5", "de la loi de finances 43-06 (preface)."]
+    lignes += [f"Article {n}\nTexte {n}." for n in ["premier", *range(2, 41)]]
+    lignes += ["Article 41\n(abrogé)", "ANNEXE", "ARTICLE 8", "Article de loi de finances."]
+    c = split_articles("\n".join(lignes), "CGI", "fiscalite", "2026", slug="cgi_2026")
+    ids = [x.id for x in c]
+    assert ids[0] == "cgi_2026:art_1"
+    assert "cgi_2026:art_5" in ids and not any("#dup" in i for i in ids)  # preface ignoree
+    assert "cgi_2026:art_41" not in ids  # abroge
+    assert ids[-1] == "cgi_2026:art_40" and "ANNEXE" not in c[-1].texte  # annexe coupee
+
+
+def test_numero_de_page_avec_tirets():
+    assert nettoyer("fin.\n- 12 -\nsuite") == "fin.\n\nsuite"
 
 
 def test_numero_repete():

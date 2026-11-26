@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 import re
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
 
@@ -50,26 +51,52 @@ def moyenne(valeurs: Iterable[float | None]) -> float:
     return sum(v) / len(v) if v else 0.0
 
 
-def bootstrap_ic(valeurs: Sequence[float | None], n: int = 2000, alpha: float = 0.05, seed: int = 0):
-    """Moyenne et intervalle de confiance a 95 % par bootstrap. Avec 60 questions de test,
-    un ecart de 2 ou 3 points entre deux configurations n'est souvent pas significatif."""
-    v = [x for x in valeurs if x is not None]
-    if not v:
-        return 0.0, 0.0, 0.0
+def _moyennes_bootstrap(valeurs: list[float], groupes: list | None, n: int, seed: int) -> list[float]:
+    """n moyennes tirees avec remise, triees. Avec des groupes, on tire des GROUPES entiers
+    (bootstrap par grappes) : 5 questions generees sur le meme article ne sont pas 5 mesures
+    independantes, et tirer les questions une par une donnerait un intervalle trop etroit."""
     rng = random.Random(seed)
-    moyennes = sorted(sum(rng.choices(v, k=len(v))) / len(v) for _ in range(n))
+    if groupes is None:
+        return sorted(sum(rng.choices(valeurs, k=len(valeurs))) / len(valeurs) for _ in range(n))
+    paquets: dict = defaultdict(list)
+    for v, g in zip(valeurs, groupes, strict=True):
+        paquets[g].append(v)
+    sommes = [(sum(p), len(p)) for p in paquets.values()]
+    res = []
+    for _ in range(n):
+        tirage = rng.choices(sommes, k=len(sommes))
+        res.append(sum(s for s, _ in tirage) / sum(c for _, c in tirage))
+    return sorted(res)
+
+
+def bootstrap_ic(
+    valeurs: Sequence[float | None], n: int = 2000, alpha: float = 0.05, seed: int = 0,
+    groupes: Sequence | None = None,
+):
+    """Moyenne et intervalle de confiance a 95 % par bootstrap. Avec 60 questions de test,
+    un ecart de 2 ou 3 points entre deux configurations n'est souvent pas significatif.
+    groupes : un identifiant par valeur (l'article d'origine) pour un bootstrap par grappes."""
+    garder = [i for i, x in enumerate(valeurs) if x is not None]
+    if not garder:
+        return 0.0, 0.0, 0.0
+    v = [valeurs[i] for i in garder]
+    g = [groupes[i] for i in garder] if groupes is not None else None
+    moyennes = _moyennes_bootstrap(v, g, n, seed)
     return sum(v) / len(v), moyennes[int(n * alpha / 2)], moyennes[int(n * (1 - alpha / 2)) - 1]
 
 
-def bootstrap_difference(a: Sequence[float | None], b: Sequence[float | None], n: int = 2000, seed: int = 0):
+def bootstrap_difference(
+    a: Sequence[float | None], b: Sequence[float | None], n: int = 2000, seed: int = 0,
+    groupes: Sequence | None = None,
+):
     """Difference moyenne b - a sur les MEMES questions (bootstrap apparie) et son IC a 95 %.
     Si l'intervalle contient 0, on ne peut pas dire que b est meilleur que a."""
-    paires = [(x, y) for x, y in zip(a, b, strict=True) if x is not None and y is not None]
-    if not paires:
+    garder = [i for i, (x, y) in enumerate(zip(a, b, strict=True)) if x is not None and y is not None]
+    if not garder:
         return 0.0, 0.0, 0.0
-    diffs = [y - x for x, y in paires]
-    rng = random.Random(seed)
-    tirages = sorted(sum(rng.choices(diffs, k=len(diffs))) / len(diffs) for _ in range(n))
+    diffs = [b[i] - a[i] for i in garder]
+    g = [groupes[i] for i in garder] if groupes is not None else None
+    tirages = _moyennes_bootstrap(diffs, g, n, seed)
     return sum(diffs) / len(diffs), tirages[int(n * 0.025)], tirages[int(n * 0.975) - 1]
 
 

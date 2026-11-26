@@ -7,6 +7,10 @@ Le corpus fait quelques milliers de chunks : un index en memoire se construit en
 
 Pourquoi pas Snowball : il racinise "loyer" en "loi", ce qui melange loyer et loi partout.
 On utilise un raciniseur leger (dans l'esprit de celui de Savoy), suffisant en recherche d'information.
+
+Arabe (loi 47-06) : normalisation orthographique classique en recherche d'information (alef
+hamza -> alef, ta marbuta -> ha, alef maqsura -> ya, voyelles supprimees) et raciniseur
+Light10 (Larkey et al.) : prefixes "ال", "وال", "بال"... et suffixes "ات", "ون", "ها"...
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ STOPWORDS = frozenset(
     """.split()
 )
 
-TOKEN_RE = re.compile(r"[a-z0-9]+")
+TOKEN_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def sans_accents(texte: str) -> str:
@@ -54,9 +58,51 @@ def raciniser(mot: str) -> str:
     return mot
 
 
+ARABE_RE = re.compile("[ء-ي]+")
+# Mots vides arabes, deja normalises (على -> علي, إلى -> الي, التي -> التي)
+STOPWORDS_AR = frozenset(
+    "في من علي الي عن ان او ما لا لم لن هذا هذه ذلك تلك التي الذي الذين اللذين كل مع بعد قبل "
+    "كما غير بين حتي عند ثم قد هو هي هم انه انها اي ب ل و ف ك اذا لدي".split()
+)
+PREFIXES_AR = ("وال", "بال", "كال", "فال", "لل", "ال")
+SUFFIXES_AR = ("ها", "ان", "ات", "ون", "ين", "يه", "ه", "ي")
+
+
+def normaliser_arabe(mot: str) -> str:
+    """Apres sans_accents (qui retire deja hamza, madda et voyelles) : ة -> ه, ى -> ي."""
+    return mot.replace("ـ", "").replace("ة", "ه").replace("ى", "ي")
+
+
+def raciniser_arabe(mot: str) -> str:
+    """Light10 : un prefixe d'article, un "و" initial, puis les suffixes, sans descendre sous 2 lettres."""
+    if len(mot) >= 4 and mot.startswith("و"):
+        mot = mot[1:]
+    for p in PREFIXES_AR:
+        if mot.startswith(p) and len(mot) - len(p) >= 2:
+            mot = mot[len(p):]
+            break
+    for s in SUFFIXES_AR:  # un seul passage dans l'ordre, comme Light10 (pas de sur-racinisation)
+        if mot.endswith(s) and len(mot) - len(s) >= 2:
+            mot = mot[: -len(s)]
+    return mot
+
+
 def tokeniser(texte: str) -> list[str]:
-    mots = TOKEN_RE.findall(sans_accents(texte.lower()))
-    return [raciniser(m) for m in mots if m not in STOPWORDS and (len(m) > 1 or m.isdigit())]
+    """Un mot compose donne un jeton entier ("plus-value" -> "plusvalu", "67-12" -> "6712")
+    en plus de ses parties : sinon "plus" (mot vide) disparait et il ne reste que "value".
+    Les mots arabes passent par la normalisation et le raciniseur Light10."""
+    normalise = sans_accents(texte.lower())
+    jetons: list[str] = []
+    for mot in ARABE_RE.findall(normalise):
+        mot = normaliser_arabe(mot)
+        if mot not in STOPWORDS_AR and len(mot) > 1:
+            jetons.append(raciniser_arabe(mot))
+    for mot in TOKEN_RE.findall(normalise):
+        parties = mot.split("-")
+        if len(parties) > 1:
+            jetons.append(raciniser("".join(parties)))
+        jetons += [raciniser(p) for p in parties if p not in STOPWORDS and (len(p) > 1 or p.isdigit())]
+    return jetons
 
 
 class BM25:

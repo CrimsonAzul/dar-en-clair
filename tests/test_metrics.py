@@ -53,3 +53,14 @@ def test_bootstrap():
     assert bas <= m <= haut
     d, bas, haut = bootstrap_difference([0] * 30, [1] * 30)
     assert d == 1 and bas == 1
+
+
+def test_bootstrap_par_grappes_plus_large():
+    # 10 articles, 6 questions chacun, reussies ou ratees ensemble : 10 mesures, pas 60.
+    valeurs = [float(i % 2) for i in range(10) for _ in range(6)]
+    groupes = [i for i in range(10) for _ in range(6)]
+    _, bas, haut = bootstrap_ic(valeurs)
+    _, bas_g, haut_g = bootstrap_ic(valeurs, groupes=groupes)
+    assert haut_g - bas_g > 1.5 * (haut - bas)
+    d, bas, haut = bootstrap_difference([0.0] * 60, [1.0] * 60, groupes=groupes)
+    assert d == 1 and bas == 1

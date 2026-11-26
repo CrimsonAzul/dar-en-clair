@@ -10,7 +10,7 @@ Assistant de questions-reponses sur l'immobilier au Maroc : location, vente, fis
 |---|---|
 | Location | Loi 67-12 (baux d'habitation et professionnels), Loi 49-16 (baux commerciaux) |
 | Vente | Loi 39-08 (Code des droits reels), Loi 32-09 (notariat) |
-| Fiscalite | Code General des Impots 2026 (parties immobilieres), Loi 47-06 (fiscalite locale) |
+| Fiscalite | Code General des Impots 2026, Loi 47-06 (fiscalite locale, version consolidee 2021 en arabe) |
 | Copropriete | Loi 18-00 |
 
 Sources et versions : [data/raw/SOURCES.md](data/raw/SOURCES.md).
@@ -41,6 +41,8 @@ Choix et raisons :
 - **Refus par seuil sur le reranker**, seuil choisi sur le jeu dev : un LLM repond presque toujours quelque chose.
 - **Citations par numero de passage** ([S2]) puis conversion en article : pas de reference inventee ou mal recopiee.
 - **Calculs dans du code** : taux dans `config/fiscal_2026.yaml`, refuses tant qu'ils ne sont pas verifies.
+- **Corpus multilingue sans traduction** : chaque texte est indexe dans sa meilleure version (la loi 47-06 consolidee n'existe qu'en arabe). bge-m3 et le reranker sont multilingues : une question en francais, arabe ou anglais trouve l'article quelle que soit sa langue. Seuls les 3 a 5 articles cites sont traduits, au moment de la reponse, et marques comme traduction automatique.
+- **PDF difficiles** : notes de bas de page reperees par la taille de police, en-tetes par leur position, sommaires et annexes ecartes, OCR Tesseract pour les scans, ligatures arabes lam-alef reparees grace a la largeur nulle de l'alef dans le glyphe.
 
 ## Lancer
 
@@ -49,7 +51,9 @@ python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[ml,dev]"
 cp .env.example .env            # ajouter GEMINI_API_KEY
 docker compose up -d db
-python -m darenclair.ingest.parse data/raw/loi_67-12.pdf --loi "Loi 67-12" --slug loi_67-12 --domaine location --edition 2013 --out data/processed/loi_67-12.jsonl
+python -m darenclair.ingest.corpus   # decoupe tous les PDF de data/raw selon config/corpus.yaml
+                                     # PDF scannes : OCR Tesseract (winget install UB-Mannheim.TesseractOCR)
+                                     # + modele fra de tessdata_best dans .tessdata/
 pytest
 ```
 
@@ -63,6 +67,34 @@ Methode dans [eval/README.md](eval/README.md) : 100 questions annotees au niveau
 | Dense (bge-m3) | | |
 | Hybride (RRF) | | |
 | Hybride + reranker | | |
+
+## Fine-tuning LoRA de bge-m3 (GPU de 6 Go)
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu126
+pip install -e ".[train]"
+ollama pull qwen2.5:7b
+python -m darenclair.finetune.questions   # 3 questions en langage courant par chunk (LLM local)
+python -m darenclair.finetune.donnees     # separation par article (90/10) + negatifs difficiles BM25
+python -m darenclair.finetune.entrainer   # LoRA r=16, GradCache (lot effectif 64), bf16, gradient checkpointing
+python -m darenclair.finetune.evaluer     # base vs LoRA, niveau article, IC bootstrap par article
+```
+
+Les questions de validation viennent d'articles jamais vus a l'entrainement (ni comme positifs, ni comme negatifs). Le chiffre a publier reste celui du jeu de test ecrit a la main : `python -m darenclair.finetune.evaluer --questions eval/questions.jsonl`.
+
+Premier essai : 6 448 questions generees par qwen2.5:7b (3 309 en francais, 3 139 en arabe), 84 % des questions d'entrainement gardees par le filtre de coherence, 4 935 triplets, 2 epoques en 56 min, pic de VRAM 2,8 Go. Un seul entrainement, aucun reglage fait sur la validation.
+
+Validation : 552 questions sur 117 articles jamais vus. Intervalles a 95 % par bootstrap sur les articles (les questions d'un meme article ne sont pas independantes).
+
+| | recall@1 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|
+| bge-m3 de base | 0.418 | 0.705 | 0.795 | 0.548 |
+| + LoRA | 0.562 | 0.824 | 0.897 | 0.675 |
+| Ecart | +0.143 [+0.093, +0.190] | +0.120 [+0.084, +0.156] | +0.101 [+0.065, +0.140] | +0.128 [+0.092, +0.162] |
+
+Le gain le plus net est entre langues : question en francais sur un article arabe, recall@5 de 0.463 a 0.683 ; question en arabe sur un article francais, de 0.654 a 0.777. Arabe vers arabe : pas d'ecart significatif (53 questions sur 24 articles, trop peu pour conclure).
+
+Limite : validation et entrainement viennent du meme generateur. Le modele a pu apprendre le style des questions de qwen2.5 en plus du vocabulaire juridique, donc le gain sur de vraies questions sera sans doute plus faible. C'est le jeu de test ecrit a la main qui tranchera.
 
 ## Avancement
 

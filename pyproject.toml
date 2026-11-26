@@ -19,6 +19,9 @@ ml = [
     "google-genai>=1.0",
 ]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Fine-tuning LoRA : installer torch avec CUDA d'abord
+# (pip install torch --index-url https://download.pytorch.org/whl/cu126)
+train = ["sentence-transformers>=3.3", "peft>=0.13", "datasets>=3.0", "accelerate>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

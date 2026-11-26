@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     domaine    TEXT NOT NULL CHECK (domaine IN ('location', 'vente', 'fiscalite', 'copropriete')),
     edition    TEXT NOT NULL,
     contexte   TEXT NOT NULL DEFAULT '',
+    langue     TEXT NOT NULL DEFAULT 'fr' CHECK (langue IN ('fr', 'ar')),
     texte      TEXT NOT NULL,
     embedding  vector(1024) NOT NULL      -- bge-m3, normalise
 );

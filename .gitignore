@@ -16,3 +16,8 @@ eval/results/
 
 web/node_modules/
 web/.next/
+.tessdata/
+data/processed/*.json
+
+models/
+data/finetune/
