@@ -10,10 +10,19 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from darenclair.ingest.parse import split_articles
+from darenclair.ingest.parse import Chunk, split_articles
 from darenclair.ingest.pdf import pdf_to_text
 
 RACINE = Path(__file__).resolve().parents[3]
+
+
+def charger_chunks() -> list[Chunk]:
+    """Tous les chunks decoupes (data/processed/*.jsonl), dans un ordre stable."""
+    chunks = []
+    for f in sorted((RACINE / "data" / "processed").glob("*.jsonl")):
+        lignes = f.read_text(encoding="utf-8").splitlines()
+        chunks += [Chunk(**json.loads(ligne)) for ligne in lignes if ligne.strip()]
+    return chunks
 
 
 def numeros_manquants(articles: list[str]) -> list[int]:

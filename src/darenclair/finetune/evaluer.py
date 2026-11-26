@@ -5,7 +5,7 @@ question et entre langues (question francaise -> article arabe, et inversement),
 intervalles de confiance par bootstrap apparie et par grappes (on tire des articles, pas des
 questions : les questions d'un meme article ne sont pas independantes). Par defaut sur data/finetune/val.jsonl
 (questions synthetiques d'articles jamais vus a l'entrainement) ; --questions pour un autre
-fichier (le jeu de test ecrit a la main, au format eval/questions.example.jsonl).
+fichier (le jeu d'evaluation, au format eval/questions.example.jsonl).
 
 Usage : python -m darenclair.finetune.evaluer [--adaptateur models/bge-m3-lora] [--questions ...]
 """
@@ -24,16 +24,10 @@ from darenclair.evaluation.metrics import (
     recall_at_k,
     reciprocal_rank,
 )
+from darenclair.ingest.corpus import charger_chunks
 from darenclair.ingest.parse import Chunk
 
 RACINE = Path(__file__).resolve().parents[3]
-
-
-def charger_chunks() -> list[Chunk]:
-    chunks = []
-    for f in sorted((RACINE / "data" / "processed").glob("*.jsonl")):
-        chunks += [Chunk(**json.loads(l)) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return chunks
 
 
 def charger_questions(path: Path, split: str | None = None) -> list[dict]:
@@ -102,11 +96,13 @@ def main() -> None:
             break
         resultats[nom] = scores(classements(modele(adapt), chunks, questions), questions)
 
+    # Une question dont les sources melangent les deux langues ne compte que dans "toutes".
     groupes = {"toutes": lambda q: True}
     for lq in ("fr", "ar"):
         for la in ("fr", "ar"):
             groupes[f"question {lq} -> article {la}"] = (
-                lambda q, lq=lq, la=la: q["langue"] == lq and langue_article.get(next(iter(q["sources"]))) == la
+                lambda q, lq=lq, la=la: q["langue"] == lq
+                and {langue_article.get(s) for s in q["sources"]} == {la}
             )
     for groupe, garder in groupes.items():
         idx = [i for i, q in enumerate(questions) if garder(q)]

@@ -1,0 +1,6 @@
+# Parametres de la recherche. Ecrit par python -m darenclair.evaluation.recherche --split dev :
+# le seuil de refus est choisi sur le jeu dev uniquement, jamais sur le test.
+seuil_refus: 0.0077
+# choisi sur dev : 34 questions normales, 6 pieges, le 2026-11-26
+k_candidats: 30   # candidats denses reclasses par le reranker
+n_passages: 5     # passages donnes au LLM : [S1]..[S5]

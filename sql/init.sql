@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS chunks (
 
 CREATE INDEX IF NOT EXISTS chunks_domaine_idx ON chunks (domaine);
 
+-- Encodeur qui a produit les vecteurs : l'API verifie qu'elle encode les questions avec le meme.
+CREATE TABLE IF NOT EXISTS meta (cle TEXT PRIMARY KEY, valeur TEXT NOT NULL);
+
 -- Pas d'index HNSW volontairement : avec quelques milliers de chunks, la recherche exacte
 -- prend quelques millisecondes, et un index approche ajouterait des erreurs de recherche
 -- (surtout combine au filtre par domaine) qui fausseraient l'evaluation.
