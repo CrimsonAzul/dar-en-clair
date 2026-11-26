@@ -1,16 +1,29 @@
 # Taux utilises par src/darenclair/tools/fiscal.py
-# Pre-remplis depuis data/raw/cgi_2026.pdf (pages du PDF entre parentheses).
-# A relire dans le PDF, puis passer verifie a true. Ne rien recopier d'un blog.
+# Tires de data/raw/cgi_2026.pdf (pages du PDF entre parentheses), relus dans le PDF le 2026-11-26.
+# Ne rien recopier d'un blog : une section reste a verifie: false tant qu'une valeur manque.
 
 profit_immobilier:
   taux: 0.20              # CGI art. 73-II-F-6° (p. 121) : profits nets fonciers de l'art. 61-II
   taux_minimum: 0.03      # CGI art. 144-II-1° (p. 270) : minimum de 3 % du prix de cession, meme sans profit
-  verifie: false
+  forfait_frais_acquisition: 0.15   # CGI art. 65-II : 15 % du prix d'acquisition, sauf frais justifies superieurs
+  seuil_minimum_habitation_principale: 4000000   # CGI art. 144-II-2° (p. 270) : habitation principale
+                                                 # exoneree (63-II-B), 3 % sur la part du prix au-dessus
+  verifie: true
+
+revenus_fonciers:
+  taux_reduit: 0.10       # CGI art. 73-II-B-5° (p. 119) : loyers bruts annuels inferieurs a 120 000 DH
+  taux_normal: 0.15       # CGI art. 73-II-C-4° (p. 120) : egaux ou superieurs a 120 000 DH
+  seuil: 120000
+  verifie: true
+
+droits_enregistrement:
+  taux_local_construit: 0.04   # CGI art. 133-I-F-1° (p. 251) : locaux construits (habitation, commerce, bureau)
+  taux_terrain_nu: 0.05        # CGI art. 133-I-G-1° (p. 251) : terrains nus ou a demolir
+  verifie: true
 
 frais_acquisition:
-  taux_enregistrement: 0.04   # CGI art. 133-I-F-1° (p. 251) : locaux construits. Terrain nu : 5 % (133-I-G)
   taux_conservation: null     # hors CGI : tarif de l'ANCFCC (decret 2-97-358 modifie), voir ancfcc.gov.ma
   frais_fixes_conservation: null  # meme source (certificat de propriete, etc.)
   taux_honoraires_notaire: null   # loi 32-09 art. 15 : fixes "par voie reglementaire" ; prendre le devis du notaire
   taux_tva_honoraires: 0.20   # CGI art. 99-A (p. 178) : taux normal, les notaires ne sont sur aucune liste de taux reduit
-  verifie: false
+  verifie: false              # reste refuse tant que conservation et notaire n'ont pas de source officielle
