@@ -2,6 +2,10 @@
 
 A ecrire **avant** de coder la recherche. Objectif : 100 questions dans `questions.jsonl`, au format de `questions.example.jsonl`.
 
+Etat actuel : les 100 questions de `questions.jsonl` sont un premier jet ecrit avec un assistant IA (Claude), pas par de vrais utilisateurs. Methode : les questions ont ete ecrites d'abord, a partir de situations courantes et sans lire les articles, puis annotees en lisant les textes du corpus (jamais a partir des resultats du moteur de recherche, pour ne pas favoriser ce qu'il trouve deja). Les ids d'articles sont verifies automatiquement, mais les reponses attendues restent a relire. Mieux encore : remplacer 20 a 30 questions par des questions de proches, comme indique plus bas. Le split dev/test est stratifie par type et par langue.
+
+Recherche dense seule, base contre LoRA, sur le jeu de test : `python -m darenclair.finetune.evaluer --questions eval/questions.jsonl --split test`.
+
 | Champ | Valeurs |
 |---|---|
 | `type` | `mono` (60), `multi` (25, au moins deux textes), `piege` (15, la bonne reponse est un refus) |

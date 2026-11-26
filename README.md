@@ -80,7 +80,7 @@ python -m darenclair.finetune.entrainer   # LoRA r=16, GradCache (lot effectif 6
 python -m darenclair.finetune.evaluer     # base vs LoRA, niveau article, IC bootstrap par article
 ```
 
-Les questions de validation viennent d'articles jamais vus a l'entrainement (ni comme positifs, ni comme negatifs). Le chiffre a publier reste celui du jeu de test ecrit a la main : `python -m darenclair.finetune.evaluer --questions eval/questions.jsonl`.
+Les questions de validation viennent d'articles jamais vus a l'entrainement (ni comme positifs, ni comme negatifs). Le chiffre a publier reste celui du jeu de test ecrit a la main : `python -m darenclair.finetune.evaluer --questions eval/questions.jsonl --split test`.
 
 Premier essai : 6 448 questions generees par qwen2.5:7b (3 309 en francais, 3 139 en arabe), 84 % des questions d'entrainement gardees par le filtre de coherence, 4 935 triplets, 2 epoques en 56 min, pic de VRAM 2,8 Go. Un seul entrainement, aucun reglage fait sur la validation.
 

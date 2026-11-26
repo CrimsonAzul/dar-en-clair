@@ -1,16 +1,16 @@
 # Taux utilises par src/darenclair/tools/fiscal.py
-# A REMPLIR depuis le CGI 2026 (DGI) : ne rien recopier d'un blog.
-# Pour chaque valeur, noter l'article source et passer verifie a true.
+# Pre-remplis depuis data/raw/cgi_2026.pdf (pages du PDF entre parentheses).
+# A relire dans le PDF, puis passer verifie a true. Ne rien recopier d'un blog.
 
 profit_immobilier:
-  taux: null              # CGI, art. ?
-  taux_minimum: null      # cotisation minimale sur le prix de cession, CGI art. ?
+  taux: 0.20              # CGI art. 73-II-F-6° (p. 121) : profits nets fonciers de l'art. 61-II
+  taux_minimum: 0.03      # CGI art. 144-II-1° (p. 270) : minimum de 3 % du prix de cession, meme sans profit
   verifie: false
 
 frais_acquisition:
-  taux_enregistrement: null   # CGI, art. ?
-  taux_conservation: null     # tarif de la conservation fonciere
-  frais_fixes_conservation: null
-  taux_honoraires_notaire: null
-  taux_tva_honoraires: null
+  taux_enregistrement: 0.04   # CGI art. 133-I-F-1° (p. 251) : locaux construits. Terrain nu : 5 % (133-I-G)
+  taux_conservation: null     # hors CGI : tarif de l'ANCFCC (decret 2-97-358 modifie), voir ancfcc.gov.ma
+  frais_fixes_conservation: null  # meme source (certificat de propriete, etc.)
+  taux_honoraires_notaire: null   # loi 32-09 art. 15 : fixes "par voie reglementaire" ; prendre le devis du notaire
+  taux_tva_honoraires: 0.20   # CGI art. 99-A (p. 178) : taux normal, les notaires ne sont sur aucune liste de taux reduit
   verifie: false

@@ -36,13 +36,16 @@ def charger_chunks() -> list[Chunk]:
     return chunks
 
 
-def charger_questions(path: Path) -> list[dict]:
-    """Accepte val.jsonl (article_id) et le format eval/ (sources : liste d'articles)."""
+def charger_questions(path: Path, split: str | None = None) -> list[dict]:
+    """Accepte val.jsonl (article_id) et le format eval/ (sources : liste d'articles).
+    Les pieges (sans source) sont ignores : ils se mesurent par le taux de refus."""
     res = []
     for l in path.read_text(encoding="utf-8").splitlines():
         if not l.strip():
             continue
         q = json.loads(l)
+        if split and q.get("split") != split:
+            continue
         sources = q.get("sources") or ([q["article_id"]] if "article_id" in q else [])
         if sources:
             res.append({"question": q["question"], "langue": q.get("langue", "fr"), "sources": set(sources)})
@@ -84,11 +87,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--adaptateur", type=Path, default=RACINE / "models" / "bge-m3-lora")
     ap.add_argument("--questions", type=Path, default=RACINE / "data" / "finetune" / "val.jsonl")
+    ap.add_argument("--split", choices=["dev", "test"], help="pour eval/questions.jsonl")
     a = ap.parse_args()
 
     chunks = charger_chunks()
     langue_article = {c.article_id: c.langue for c in chunks}
-    questions = charger_questions(a.questions)
+    questions = charger_questions(a.questions, a.split)
     print(f"{len(questions)} questions, {len(chunks)} chunks")
 
     resultats = {}
