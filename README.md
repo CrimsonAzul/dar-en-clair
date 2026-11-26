@@ -60,10 +60,20 @@ docker compose up -d db
 python -m darenclair.ingest.corpus   # decoupe les PDF de data/raw selon config/corpus.yaml
                                      # PDF scannes : OCR Tesseract + modele fra de tessdata_best dans .tessdata/
 python -m darenclair.ingest.indexer  # vecteurs bge-m3 + LoRA dans pgvector (1 min sur RTX 3060)
-uvicorn darenclair.api.main:app --port 8000
+uvicorn darenclair.api.main:app --port 8000 --env-file .env
 cd web && npm install && npm run dev # interface sur http://localhost:3000
 pytest
 ```
+
+Changer de LLM local : `OLLAMA_MODEL` dans `.env` (ou dans le terminal avant de lancer l'API ou une evaluation), par exemple sous PowerShell :
+
+```powershell
+$env:LLM_PROVIDER="ollama"; $env:OLLAMA_MODEL="qwen3.5:4b"
+uvicorn darenclair.api.main:app --port 8000
+python -m darenclair.evaluation.generation --split dev   # memes mesures que le tableau, pour ce modele
+```
+
+La reflexion des modeles qui en ont une (Qwen3.5) est coupee par defaut ; `OLLAMA_THINK=1` pour la garder.
 
 L'adaptateur LoRA (`models/bge-m3-lora`) n'est pas versionne : le recreer avec les commandes du fine-tuning, ou lancer l'indexation et l'API avec `ADAPTATEUR=` pour bge-m3 de base. Le seuil de refus est dans `config/recherche.yaml` (ecrit par l'evaluation sur dev).
 
@@ -112,7 +122,7 @@ Ce que ca montre :
 - Les questions en arabe et en anglais passent mal avec ce modele : 3 sur 7 et 1 sur 5 repondues sur test, contre 25 sur 39 en francais. La recherche multilingue n'est pas seule en cause : qwen2.5:7b refuse plus souvent et repond parfois en francais a une question en anglais. C'est le premier point a verifier avec Gemini.
 - Pas de juge LLM pour la fidelite des reponses : il faudrait d'abord le valider sur 20 reponses notees a la main. En lisant les reponses, on trouve encore des erreurs de fond (par exemple une augmentation de loyer "plus frequente si les parties sont d'accord", que l'article 32 de la loi 67-12 interdit).
 
-Calculs (jeu dev, les 4 questions chiffrees y sont toutes) : apres une revision du prompt sur dev, le modele appelle le bon outil pour les 4 (4 800, 36 000, 30 000 et 40 000 DH, tous corrects). Avant la revision, il calculait lui-meme ou se trompait d'outil (2 sur 4). La revision (qui paie quel impot dans la description des outils, verifier que les passages parlent de la meme situation, HORS_CORPUS accepte n'importe ou dans la reponse) a ete faite une seule fois, sur dev : pieges refuses de 4/6 a 6/6, questions normales repondues de 28/34 a 24/34.
+Calculs (jeu dev, les 4 questions chiffrees y sont toutes) : apres une revision du prompt sur dev, le modele appelle le bon outil pour les 4 (4 800, 36 000, 30 000 et 40 000 DH, tous corrects). Avant la revision, il calculait lui-meme ou se trompait d'outil : aucun des 4 montants ne sortait du bon outil. Un calcul compte comme correct seulement si un outil a renvoye le montant attendu et que ce montant est dans la reponse (le nombre seul dans le texte peut etre un hasard). La revision (qui paie quel impot dans la description des outils, verifier que les passages parlent de la meme situation, HORS_CORPUS accepte n'importe ou dans la reponse) a ete faite une seule fois, sur dev : pieges refuses de 4/6 a 6/6, questions normales repondues de 28/34 a 24/34.
 
 ## Fine-tuning LoRA de bge-m3 (GPU de 6 Go)
 

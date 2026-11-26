@@ -34,6 +34,18 @@ def montant_present(texte: str, montant: float) -> bool:
     return str(int(montant)) in nombres
 
 
+def calcul_correct(resultat: dict) -> bool:
+    """Le montant attendu doit sortir d'un outil ET figurer dans la reponse. Le texte seul ne
+    suffit pas : un modele peut ecrire le bon nombre par hasard (le loyer annuel, par exemple)."""
+    attendu = resultat["calcul_attendu"]
+    rep = resultat["reponse"]
+    par_outil = any(
+        abs(c["resultat"].get("resultat", {}).get("montant", -1) - attendu) < 0.5
+        for c in rep["appels_outils"]
+    )
+    return par_outil and montant_present(rep["texte"], attendu)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", choices=["dev", "test"], required=True)
@@ -87,10 +99,9 @@ def main() -> None:
         print(f"  citations inventees          : {sum(r['reponse']['citations_inventees'] for r in repondus)}")
     calculs = [r for r in resultats if r["calcul_attendu"]]
     for r in calculs:
-        ok = montant_present(r["reponse"]["texte"], r["calcul_attendu"])
         outils = [c["outil"] for c in r["reponse"]["appels_outils"]]
-        print(f"  calcul {r['id']} : attendu {r['calcul_attendu']:,.0f} DH, {'trouve' if ok else 'ABSENT'}"
-              f" dans la reponse, outils appeles {outils}")
+        print(f"  calcul {r['id']} : attendu {r['calcul_attendu']:,.0f} DH,"
+              f" {'correct' if calcul_correct(r) else 'FAUX ou absent'} (outils appeles {outils})")
 
     sortie = RACINE / "eval" / "results" / f"generation_{a.split}_{llm.nom.replace(':', '_')}.json"
     sortie.write_text(json.dumps(resultats, ensure_ascii=False, indent=1), encoding="utf-8")

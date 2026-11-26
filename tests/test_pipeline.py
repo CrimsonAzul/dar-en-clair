@@ -94,12 +94,28 @@ def test_message_numerote_les_passages():
     assert texte.index("[S1]") < texte.index("[S2]") and texte.endswith("Question : Q ?")
 
 
+def test_bloc_de_reflexion_retire():
+    from darenclair.generation.llm import sans_pensee
+
+    assert sans_pensee("<think>\nje calcule...\n</think>\n\nDeux mois [S1].") == "Deux mois [S1]."
+    assert sans_pensee(None) == ""
+
+
 def test_montant_present_quel_que_soit_le_format():
     from darenclair.evaluation.generation import montant_present
 
     assert montant_present("soit 36 000 DH [S1]", 36_000)
     assert montant_present("soit 36.000 DH", 36_000) and montant_present("36,000 dirhams", 36_000)
     assert not montant_present("soit 3 600 DH", 36_000)
+
+
+def test_calcul_correct_exige_l_outil():
+    from darenclair.evaluation.generation import calcul_correct
+
+    appel = {"outil": "droits_enregistrement", "arguments": {}, "resultat": {"resultat": {"montant": 36_000}}}
+    bon = {"calcul_attendu": 36_000, "reponse": {"texte": "36 000 DH [S1]", "appels_outils": [appel]}}
+    sans_outil = {"calcul_attendu": 36_000, "reponse": {"texte": "36 000 DH [S1]", "appels_outils": []}}
+    assert calcul_correct(bon) and not calcul_correct(sans_outil)
 
 
 def test_outils_fiscaux():

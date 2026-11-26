@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,11 +24,36 @@ class Sortie:
     appels: list[dict] = field(default_factory=list)  # [{"outil", "arguments", "resultat"}]
 
 
+PENSEE_RE = re.compile(r"<think>.*?</think>", re.S)
+
+
+def sans_pensee(texte: str) -> str:
+    """Retire un bloc <think>...</think> que certains modeles laissent dans la reponse."""
+    return PENSEE_RE.sub("", texte or "").strip()
+
+
 class Ollama:
+    """Modele local. Les modeles a "reflexion" (Qwen3.5...) l'ont desactivee par defaut :
+    reponses plus courtes et plus rapides ; OLLAMA_THINK=1 pour la garder."""
+
     def __init__(self, modele: str | None = None, url: str | None = None):
         self.modele = modele or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
         self.url = (url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
         self.nom = f"ollama:{self.modele}"
+        self._reflexion: bool | None = None
+
+    def _post(self, chemin: str, corps: dict) -> dict:
+        req = urllib.request.Request(
+            f"{self.url}{chemin}", data=json.dumps(corps).encode(), headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=600) as r:
+            return json.loads(r.read())
+
+    def sait_reflechir(self) -> bool:
+        if self._reflexion is None:
+            infos = self._post("/api/show", {"model": self.modele})
+            self._reflexion = "thinking" in infos.get("capabilities", [])
+        return self._reflexion
 
     def _chat(self, messages: list[dict], outils: list[dict]) -> dict:
         corps = {
@@ -35,11 +61,9 @@ class Ollama:
             "tools": [{"type": "function", "function": o} for o in outils],
             "options": {"temperature": 0, "num_ctx": 8192},
         }
-        req = urllib.request.Request(
-            f"{self.url}/api/chat", data=json.dumps(corps).encode(), headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=600) as r:
-            return json.loads(r.read())["message"]
+        if self.sait_reflechir():
+            corps["think"] = os.getenv("OLLAMA_THINK", "") == "1"
+        return self._post("/api/chat", corps)["message"]
 
     def repondre(self, systeme: str, message: str, outils: list[dict], executer: Executeur) -> Sortie:
         messages = [{"role": "system", "content": systeme}, {"role": "user", "content": message}]
@@ -48,14 +72,14 @@ class Ollama:
             m = self._chat(messages, outils)
             demandes = m.get("tool_calls") or []
             if not demandes:
-                return Sortie(m.get("content", "").strip(), appels)
+                return Sortie(sans_pensee(m.get("content", "")), appels)
             messages.append(m)
             for d in demandes:
                 nom, args = d["function"]["name"], d["function"].get("arguments") or {}
                 resultat = executer(nom, args)
                 appels.append({"outil": nom, "arguments": args, "resultat": resultat})
                 messages.append({"role": "tool", "tool_name": nom, "content": json.dumps(resultat, ensure_ascii=False)})
-        return Sortie(self._chat(messages, [])["content"].strip(), appels)
+        return Sortie(sans_pensee(self._chat(messages, [])["content"]), appels)
 
 
 class Gemini:
