@@ -21,3 +21,5 @@ data/processed/*.json
 
 models/
 data/finetune/
+web/*.tsbuildinfo
+web/AGENTS.md

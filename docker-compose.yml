@@ -15,16 +15,25 @@ services:
       interval: 5s
       retries: 10
 
+  # API sur CPU (lente, image pas encore construite ni testee). Sur une machine avec GPU, lancer
+  # plutot uvicorn depuis le venv. L'adaptateur LoRA vient de ./models (non versionne).
   api:
     build: .
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://darenclair:darenclair@db:5432/darenclair
+      OLLAMA_URL: http://host.docker.internal:11434
     ports:
       - "8000:8000"
+    volumes:
+      - ./models:/app/models:ro
+      - hf-cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   pgdata:
+  hf-cache:
