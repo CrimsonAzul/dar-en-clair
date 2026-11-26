@@ -1,5 +1,9 @@
 # Dar en Clair
 
+**In English.** Dar en Clair is a question answering assistant on Moroccan real estate law: renting, buying and selling, property tax and co-ownership. It searches 7 official texts (1,523 article-level chunks, French and Arabic), answers with numbered citations that link back to the exact articles, refuses when the texts do not cover the question, and leaves tax amounts to tested Python code instead of the language model. Retrieval is bge-m3 with a LoRA adapter I fine-tuned on a 6 GB laptop GPU, exact search in pgvector, then the bge-reranker-v2-m3 cross-encoder. The main numbers come from a separate 100-question set (drafted with an AI assistant, then checked against the law texts) split into dev, used for every tuning decision, and test, run once per configuration, with bootstrap confidence intervals. On the 51 test questions that have a source, the shipped pipeline (dense + reranker) reaches recall@5 0.578 and MRR 0.608. At this sample size the reranker's gain over dense search alone is not significant, and fusing BM25 through RRF clearly hurts (recall@5 -0.144). With a small local model (qwen2.5:7b through Ollama), the assistant refuses 8 of 9 trap questions and never cites a passage that does not exist, but it is over-cautious: it answers only 29 of the 51 test questions it should answer, and most questions in Arabic or English. Stack: Python, PyTorch, sentence-transformers, PEFT, PostgreSQL + pgvector, FastAPI, Next.js, Gemini or a local model through Ollama. Answers are informative only, not legal advice.
+
+---
+
 Assistant de questions-reponses sur l'immobilier au Maroc : location, vente, fiscalite immobiliere et copropriete. Il repond en citant les articles de loi utilises, refuse quand le corpus ne couvre pas la question, et confie les calculs d'impots a du code Python teste plutot qu'au modele.
 
 > Reponses informatives, pas un conseil juridique ou fiscal.
@@ -13,65 +17,106 @@ Assistant de questions-reponses sur l'immobilier au Maroc : location, vente, fis
 | Fiscalite | Code General des Impots 2026, Loi 47-06 (fiscalite locale, version consolidee 2021 en arabe) |
 | Copropriete | Loi 18-00 |
 
-Sources et versions : [data/raw/SOURCES.md](data/raw/SOURCES.md).
+1 217 articles, 1 523 chunks (193 en arabe). Sources et versions : [data/raw/SOURCES.md](data/raw/SOURCES.md).
 
 ## Architecture
 
 ```
-PDF -> nettoyage -> 1 chunk par article (+ morceaux de 350 mots si long)
-                    texte indexe = "Loi > Titre > Chapitre > Article N" + contenu
+PDF -> nettoyage (OCR si scan) -> 1 chunk par article (+ morceaux de 350 mots si long)
+       texte indexe = "Loi > Titre > Chapitre > Article N" + contenu
 
-question ─┬─> bge-m3 dense (pgvector, recherche exacte), top 30 ─┐
-          └─> BM25 francais (en memoire), top 30 ─────────────────┴─> RRF ─> top 30
-                                                                           │
-                                       reranker bge-reranker-v2-m3 <───────┘
-                                                  │
-                         score max < seuil ? ── oui ──> refus explicite
-                                                  │ non
-                                     top 5 passages numerotes [S1]..[S5]
-                                                  │
-                     outils fiscaux (Python) <── LLM ──> reponse + citations [S2]
-                                                         -> "Loi 67-12, art. 34"
+question -> bge-m3 + LoRA -> pgvector (recherche exacte) -> 30 candidats
+                                                               |
+                              reranker bge-reranker-v2-m3 <----+
+                                         |
+                    score max < seuil ? -- oui --> refus explicite
+                                         | non
+                           5 passages numerotes [S1]..[S5]
+                                         |
+              outils fiscaux (Python) <-- LLM --> reponse + citations [S2]
+                                                  -> "Loi 67-12, art. 34"
+              LLM qui juge les passages insuffisants -> HORS_CORPUS -> refus
 ```
 
 Choix et raisons :
-- **Contexte dans le chunk** : un article seul ("le preneur doit...") est ambigu ; le chemin Titre > Chapitre aide la recherche dense et BM25.
-- **BM25 en Python** plutot que le plein texte Postgres : vrai IDF, questions en langage courant (pas besoin que tous les mots soient presents), insensible aux accents. Raciniseur leger maison car Snowball transforme "loyer" en "loi".
-- **RRF** : fusion par rangs, pas de calibration de scores entre BM25 et cosinus.
-- **Refus par seuil sur le reranker**, seuil choisi sur le jeu dev : un LLM repond presque toujours quelque chose.
-- **Citations par numero de passage** ([S2]) puis conversion en article : pas de reference inventee ou mal recopiee.
-- **Calculs dans du code** : taux dans `config/fiscal_2026.yaml`, refuses tant qu'ils ne sont pas verifies.
-- **Corpus multilingue sans traduction** : chaque texte est indexe dans sa meilleure version (la loi 47-06 consolidee n'existe qu'en arabe). bge-m3 et le reranker sont multilingues : une question en francais, arabe ou anglais trouve l'article quelle que soit sa langue. Seuls les 3 a 5 articles cites sont traduits, au moment de la reponse, et marques comme traduction automatique.
+- **Contexte dans le chunk** : un article seul ("le preneur doit...") est ambigu ; le chemin Titre > Chapitre aide la recherche.
+- **LoRA sur bge-m3** : 6 448 questions synthetiques, entrainement sur un GPU de 6 Go (detail plus bas). Gain significatif sur le jeu de test (recall@5), plus faible que sur les questions synthetiques.
+- **Pas de BM25 dans le chemin livre.** Je l'avais prevu (BM25 maison avec un raciniseur leger, fusion RRF). Mesure sur le jeu dev : BM25 seul trouve peu de choses avec des questions en langage courant (recall@5 0.245 contre 0.647 en dense), et la fusion RRF degrade l'ordre des candidats denses. Le code reste dans le depot et ces configurations sont mesurees dans le tableau.
+- **Reranker sur les 30 candidats denses** : la variante la plus simple et la meilleure sur dev (reclasser l'union dense + BM25 donnait un MRR plus bas). Sur test, son gain sur le dense seul n'est pas significatif ; son score sert aussi au refus.
+- **Refus a deux niveaux** : un seuil sur le score du reranker, choisi sur dev, puis le LLM qui doit repondre HORS_CORPUS si les passages ne repondent pas. Un LLM seul repond presque toujours quelque chose.
+- **Citations par numero de passage** ([S2]) puis conversion en article : pas de reference inventee ou mal recopiee. Un numero hors liste est compte comme citation inventee.
+- **Calculs dans du code** : taux dans `config/fiscal_2026.yaml`, relus dans le PDF du CGI avec l'article et la page. Une section avec une valeur manquante est refusee par l'outil (frais de conservation fonciere et de notaire : pas de source officielle dans le corpus).
+- **Corpus multilingue sans traduction** : chaque texte est indexe dans sa meilleure version (la loi 47-06 consolidee n'existe qu'en arabe). bge-m3 et le reranker sont multilingues : une question en francais, arabe ou anglais trouve l'article quelle que soit sa langue. Le LLM repond dans la langue de la question ; l'article cite est montre tel quel.
 - **PDF difficiles** : notes de bas de page reperees par la taille de police, en-tetes par leur position, sommaires et annexes ecartes, OCR Tesseract pour les scans, ligatures arabes lam-alef reparees grace a la largeur nulle de l'alef dans le glyphe.
 
 ## Lancer
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
+pip install torch --index-url https://download.pytorch.org/whl/cu126   # ou /cpu
 pip install -e ".[ml,dev]"
-cp .env.example .env            # ajouter GEMINI_API_KEY
+cp .env.example .env                 # GEMINI_API_KEY, sinon Ollama en local (ollama pull qwen2.5:7b)
 docker compose up -d db
-python -m darenclair.ingest.corpus   # decoupe tous les PDF de data/raw selon config/corpus.yaml
-                                     # PDF scannes : OCR Tesseract (winget install UB-Mannheim.TesseractOCR)
-                                     # + modele fra de tessdata_best dans .tessdata/
+python -m darenclair.ingest.corpus   # decoupe les PDF de data/raw selon config/corpus.yaml
+                                     # PDF scannes : OCR Tesseract + modele fra de tessdata_best dans .tessdata/
+python -m darenclair.ingest.indexer  # vecteurs bge-m3 + LoRA dans pgvector (1 min sur RTX 3060)
+uvicorn darenclair.api.main:app --port 8000
+cd web && npm install && npm run dev # interface sur http://localhost:3000
 pytest
 ```
 
+L'adaptateur LoRA (`models/bge-m3-lora`) n'est pas versionne : le recreer avec les commandes du fine-tuning, ou lancer l'indexation et l'API avec `ADAPTATEUR=` pour bge-m3 de base. Le seuil de refus est dans `config/recherche.yaml` (ecrit par l'evaluation sur dev).
+
 ## Evaluation
 
-Methode dans [eval/README.md](eval/README.md) : 100 questions annotees au niveau article, separees en dev (reglages) et test (chiffres publies), intervalles de confiance par bootstrap.
+Methode dans [eval/README.md](eval/README.md) : 100 questions annotees au niveau article (60 simples, 25 sur plusieurs textes, 15 pieges dont la bonne reponse est un refus), 40 en dev pour tous les reglages, 60 en test lances une seule fois par configuration. Metriques au niveau article (deux morceaux du meme article comptent une fois), intervalles a 95 % par bootstrap, ecarts entre configurations par bootstrap apparie.
 
-| Configuration (jeu test) | recall@5 | MRR |
-|---|---|---|
-| BM25 | | |
-| Dense (bge-m3) | | |
-| Hybride (RRF) | | |
-| Hybride + reranker | | |
+Les questions ont ete ecrites avec un assistant IA puis relues contre les textes, pas par de vrais utilisateurs : c'est la principale limite de ces chiffres.
+
+### Recherche (jeu test, 51 questions avec source)
+
+| Configuration | recall@5 | recall@10 | MRR |
+|---|---|---|---|
+| BM25 | 0.225 [0.131, 0.330] | 0.291 | 0.229 [0.135, 0.334] |
+| Dense (bge-m3 + LoRA, pgvector) | 0.631 [0.529, 0.735] | 0.686 | 0.568 [0.462, 0.678] |
+| Hybride (RRF dense + BM25) | 0.487 [0.366, 0.605] | 0.572 | 0.456 [0.350, 0.565] |
+| **Dense + reranker (chemin livre)** | 0.578 [0.464, 0.693] | 0.699 | 0.608 [0.498, 0.713] |
+| Hybride + reranker | 0.595 [0.480, 0.706] | 0.683 | 0.597 [0.484, 0.704] |
+| Union dense et BM25 + reranker | 0.569 [0.454, 0.686] | 0.683 | 0.585 [0.476, 0.694] |
+
+Ecarts apparies sur test (IC a 95 %) :
+- dense contre BM25 : recall@5 +0.405 [+0.291, +0.523], significatif ;
+- hybride contre dense : recall@5 -0.144 [-0.225, -0.069], significatif. Ajouter BM25 par RRF fait sortir du top 5 des articles que le dense trouvait ;
+- dense + reranker contre dense : recall@5 -0.052 [-0.124, +0.023], MRR +0.040 [-0.067, +0.140], non significatifs. Sur 51 questions, le reranker n'apporte pas de gain mesurable a la recherche dense avec LoRA ;
+- hybride + reranker contre hybride : MRR +0.141 [+0.049, +0.235], significatif. Le reranker repare surtout ce que la fusion a abime.
+
+Le chemin livre a ete choisi sur dev (34 questions), avant de lancer le test : dense + reranker y avait le meilleur MRR (0.689, contre 0.650 pour hybride + reranker et 0.636 pour dense seul), sans ecart significatif. Sur test, dense seul fait aussi bien. Je n'ai rien change apres avoir vu ces chiffres : ce serait regler sur le test.
+
+### Refus et generation (jeu test, 60 questions)
+
+LLM : qwen2.5:7b en local via Ollama (pas de cle Gemini sur la machine de test). C'est un petit modele : ces chiffres sont un plancher. Le meme script tourne avec Gemini des qu'une cle est dans `.env`.
+
+| | Jeu test |
+|---|---|
+| Pieges refuses par le seuil du reranker seul (seuil 0.0077 choisi sur dev) | 1 / 9 |
+| Pieges refuses au total (seuil + LLM qui repond HORS_CORPUS) | 8 / 9 |
+| Questions normales repondues | 29 / 51 |
+| Precision des citations (articles cites qui sont attendus) | 0.609 [0.460, 0.753] |
+| Rappel des citations (articles attendus qui sont cites) | 0.678 [0.523, 0.816] |
+| Citations inventees ([S9] alors qu'il n'y a que 5 passages) | 0 |
+| Reponses sans aucune citation | 1 / 29 |
+
+Ce que ca montre :
+- Le seuil sur le score du reranker refuse peu de pieges : les pieges proches d'un texte du corpus ont des scores aussi hauts que de vraies questions. C'est le LLM qui fait l'essentiel du tri. Le seul piege non refuse (q090, aide de l'Etat pour un premier logement) tombe sur l'article 247 du CGI (logement social et a faible valeur immobiliere) : le modele a presente ces regimes fiscaux comme s'ils etaient l'aide directe.
+- Le defaut principal est l'exces de prudence : 20 questions normales refusees par le LLM. Pour 9 d'entre elles, aucun article attendu n'etait dans les 5 passages (refus justifie, la faute est a la recherche) ; pour les 11 autres, l'article etait la. Les questions sur plusieurs textes sont les plus touchees (12 refusees sur 15) : le modele refuse des qu'une partie de la question n'est pas couverte.
+- Les questions en arabe et en anglais passent mal avec ce modele : 3 sur 7 et 1 sur 5 repondues sur test, contre 25 sur 39 en francais. La recherche multilingue n'est pas seule en cause : qwen2.5:7b refuse plus souvent et repond parfois en francais a une question en anglais. C'est le premier point a verifier avec Gemini.
+- Pas de juge LLM pour la fidelite des reponses : il faudrait d'abord le valider sur 20 reponses notees a la main. En lisant les reponses, on trouve encore des erreurs de fond (par exemple une augmentation de loyer "plus frequente si les parties sont d'accord", que l'article 32 de la loi 67-12 interdit).
+
+Calculs (jeu dev, les 4 questions chiffrees y sont toutes) : apres une revision du prompt sur dev, le modele appelle le bon outil pour les 4 (4 800, 36 000, 30 000 et 40 000 DH, tous corrects). Avant la revision, il calculait lui-meme ou se trompait d'outil (2 sur 4). La revision (qui paie quel impot dans la description des outils, verifier que les passages parlent de la meme situation, HORS_CORPUS accepte n'importe ou dans la reponse) a ete faite une seule fois, sur dev : pieges refuses de 4/6 a 6/6, questions normales repondues de 28/34 a 24/34.
 
 ## Fine-tuning LoRA de bge-m3 (GPU de 6 Go)
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu126
 pip install -e ".[train]"
 ollama pull qwen2.5:7b
 python -m darenclair.finetune.questions   # 3 questions en langage courant par chunk (LLM local)
@@ -80,11 +125,9 @@ python -m darenclair.finetune.entrainer   # LoRA r=16, GradCache (lot effectif 6
 python -m darenclair.finetune.evaluer     # base vs LoRA, niveau article, IC bootstrap par article
 ```
 
-Les questions de validation viennent d'articles jamais vus a l'entrainement (ni comme positifs, ni comme negatifs). Le chiffre a publier reste celui du jeu de test ecrit a la main : `python -m darenclair.finetune.evaluer --questions eval/questions.jsonl --split test`.
-
 Premier essai : 6 448 questions generees par qwen2.5:7b (3 309 en francais, 3 139 en arabe), 84 % des questions d'entrainement gardees par le filtre de coherence, 4 935 triplets, 2 epoques en 56 min, pic de VRAM 2,8 Go. Un seul entrainement, aucun reglage fait sur la validation.
 
-Validation : 552 questions sur 117 articles jamais vus. Intervalles a 95 % par bootstrap sur les articles (les questions d'un meme article ne sont pas independantes).
+Validation : 552 questions synthetiques sur 117 articles jamais vus a l'entrainement. Intervalles a 95 % par bootstrap sur les articles (les questions d'un meme article ne sont pas independantes).
 
 | | recall@1 | recall@5 | recall@10 | MRR |
 |---|---|---|---|---|
@@ -92,15 +135,36 @@ Validation : 552 questions sur 117 articles jamais vus. Intervalles a 95 % par b
 | + LoRA | 0.562 | 0.824 | 0.897 | 0.675 |
 | Ecart | +0.143 [+0.093, +0.190] | +0.120 [+0.084, +0.156] | +0.101 [+0.065, +0.140] | +0.128 [+0.092, +0.162] |
 
-Le gain le plus net est entre langues : question en francais sur un article arabe, recall@5 de 0.463 a 0.683 ; question en arabe sur un article francais, de 0.654 a 0.777. Arabe vers arabe : pas d'ecart significatif (53 questions sur 24 articles, trop peu pour conclure).
+Le gain le plus net est entre langues : question en francais sur un article arabe, recall@5 de 0.463 a 0.683 ; question en arabe sur un article francais, de 0.654 a 0.777.
 
-Limite : validation et entrainement viennent du meme generateur. Le modele a pu apprendre le style des questions de qwen2.5 en plus du vocabulaire juridique, donc le gain sur de vraies questions sera sans doute plus faible. C'est le jeu de test ecrit a la main qui tranchera.
+Sur le jeu de test de `eval/questions.jsonl` (51 questions avec source, 42 articles), recherche dense seule :
+
+| | recall@1 | recall@5 | recall@10 | MRR |
+|---|---|---|---|---|
+| bge-m3 de base | 0.353 | 0.552 | 0.614 | 0.563 |
+| + LoRA | 0.337 | 0.631 | 0.686 | 0.558 |
+| Ecart | -0.016 [-0.098, +0.054] | +0.078 [+0.020, +0.148] | +0.072 [+0.000, +0.149] | -0.004 [-0.087, +0.078] |
+
+Le LoRA fait entrer plus d'articles pertinents dans le top 5 (+0.078, significatif), mais ne change pas le premier resultat (recall@1 et MRR stables). Le gain est plus faible que sur la validation, comme prevu : validation et entrainement viennent du meme generateur, et le modele a pu apprendre le style des questions de qwen2.5. Sur le jeu dev (34 questions), aucun ecart n'est significatif. Le LoRA a ete garde sur la foi de la validation, avant de regarder le test.
+
+## Calculs fiscaux
+
+`src/darenclair/tools/fiscal.py`, appeles par le LLM comme outils :
+- impot sur le profit immobilier : forfait de 15 % de frais d'acquisition sauf frais justifies superieurs, reevaluation du prix augmente des frais, investissements et interets (art. 65), taux de 20 % (73-II-F-6°), minimum de 3 % du prix (144-II-1°), cas de l'habitation principale au-dela de 4 MDH (144-II-2°) ;
+- impot sur les loyers : 10 % du brut annuel sous 120 000 DH, 15 % au-dela (73-II-B-5° et C-4°) ;
+- droits d'enregistrement : 4 % pour un local construit, 5 % pour un terrain nu (133-I-F et G).
+
+Chaque taux vient du PDF officiel du CGI 2026, avec l'article et la page dans la config. Les frais de conservation fonciere (tarif de l'ANCFCC) et les honoraires de notaire ne sont pas dans le corpus : l'outil qui les additionnerait reste desactive.
 
 ## Avancement
 
-- [x] Decoupage, BM25, RRF, metriques, seuil de refus, calculateur fiscal (taux a remplir)
-- [ ] Textes telecharges, decoupes et verifies a la main
-- [ ] 100 questions annotees
-- [ ] Embeddings + pgvector, puis hybride, puis reranker
-- [ ] Generation avec citations et outils
-- [ ] API, interface Next.js
+- [x] Textes telecharges, decoupes et verifies (7 textes, 1 523 chunks)
+- [x] 100 questions annotees, relues contre les textes
+- [x] Fine-tuning LoRA de bge-m3, mesure sur validation et sur test
+- [x] Embeddings dans pgvector, reranker, seuil de refus choisi sur dev
+- [x] Recherche mesuree sur test (6 configurations)
+- [x] Generation avec citations et outils fiscaux, mesuree sur dev et test
+- [x] API FastAPI, interface Next.js
+- [ ] Remplacer 20 a 30 questions par des questions de vrais utilisateurs
+- [ ] Juge LLM pour la fidelite des reponses, valide sur 20 reponses notees a la main
+- [ ] Traduction a la demande des articles cites dans une autre langue que la question
