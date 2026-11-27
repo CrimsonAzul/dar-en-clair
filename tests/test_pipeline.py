@@ -83,6 +83,61 @@ def test_refus_par_seuil_et_par_llm():
     assert rep.refus
 
 
+class FauxLLMCalcul(FauxLLM):
+    def __init__(self, texte, extraction):
+        super().__init__(texte)
+        self.extraction, self.extraits, self.outils_vus = extraction, 0, None
+
+    def extraire(self, systeme, texte, schema):
+        self.extraits += 1
+        return self.extraction
+
+    def repondre(self, systeme, msg, outils, executer):
+        self.outils_vus = outils
+        return super().repondre(systeme, msg, outils, executer)
+
+
+def test_calcul_decide_par_le_code_et_montant_ajoute_si_oublie():
+    from darenclair.generation.repondre import generer
+
+    llm = FauxLLMCalcul("Le taux est de 10 % [S1].", {"calcul": "impot_revenus_fonciers", "loyer_mensuel": 4000})
+    rep = generer("Je loue 4 000 DH par mois, combien d'impôt ?", CHUNKS[:1], [0.9], llm)
+    appel = rep.appels_outils[0]
+    assert appel["par"] == "code" and appel["arguments"] == {"loyers_bruts_annuels": 48_000}
+    assert appel["resultat"]["resultat"]["montant"] == 4_800
+    assert "a reprendre tel quel" in llm.vu and llm.outils_vus == []  # le modele ne choisit plus l'outil
+    assert "4 800 DH" in rep.texte  # absent de la reponse du modele : ajoute par le code
+
+
+def test_pas_de_calcul_sans_chiffre_ni_avec_montant_invente():
+    from darenclair.generation.repondre import generer
+
+    sans_chiffre = FauxLLMCalcul("x [S1]", {"calcul": "impot_revenus_fonciers", "loyer_mensuel": 4000})
+    generer("Combien d'impôt sur mes loyers ?", CHUNKS[:1], [0.9], sans_chiffre)
+    assert sans_chiffre.extraits == 0
+    invente = FauxLLMCalcul("x [S1]", {"calcul": "impot_revenus_fonciers", "loyer_mensuel": 5000})
+    assert generer("Je loue 4 000 DH par mois", CHUNKS[:1], [0.9], invente).appels_outils == []
+    terrain = FauxLLMCalcul("x [S1]", {"calcul": "droits_enregistrement", "prix_achat": 500000, "nature_bien": "inconnu"})
+    assert generer("J'achète un bien à 500 000 DH", CHUNKS[:1], [0.9], terrain).appels_outils == []
+
+
+def test_droits_enregistrement_prix_dans_l_un_ou_l_autre_champ():
+    from darenclair.generation.calcul import appel_depuis_extraction
+
+    q = "J'achète un appartement de 1 000 000 DH"
+    e = {"calcul": "droits_enregistrement", "prix_achat": None, "prix_vente": 1_000_000, "nature_bien": "local_construit"}
+    assert appel_depuis_extraction(e, q) == ("droits_enregistrement", {"prix": 1_000_000.0, "nature": "local_construit"})
+
+
+def test_calcul_vente_avec_forfait():
+    from darenclair.generation.calcul import appel_depuis_extraction
+
+    q = "Je vends 1 000 000 DH un terrain payé 900 000 DH"
+    e = {"calcul": "impot_profit_immobilier", "prix_vente": 1_000_000, "prix_achat": 900_000}
+    assert appel_depuis_extraction(e, q) == (
+        "impot_profit_immobilier", {"prix_cession": 1_000_000.0, "prix_acquisition": 900_000.0})
+
+
 def test_langue_question():
     assert langue_question("هل يمكنني البقاء في الشقة؟") == "ar"
     assert langue_question("Can my landlord raise the rent?") == "en"

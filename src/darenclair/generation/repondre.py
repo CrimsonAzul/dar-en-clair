@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from darenclair.evaluation.metrics import SOURCE_RE, citations_inventees
+from darenclair.generation import calcul
 from darenclair.generation.outils import OUTILS, executer
 from darenclair.generation.prompt import (
     HORS_CORPUS,
@@ -32,16 +33,44 @@ def numeros_cites(texte: str) -> set[int]:
     return {int(n) for n in SOURCE_RE.findall(texte)}
 
 
+def calcul_par_le_code(question: str, llm) -> dict | None:
+    """Etapes 1 a 3 de generation/calcul.py : filtre, extraction a format impose, appel d'outil."""
+    if not calcul.a_calculer(question) or not hasattr(llm, "extraire"):
+        return None
+    try:
+        extraction = llm.extraire(calcul.SYSTEME, question, calcul.SCHEMA)
+    except (OSError, ValueError):
+        return None
+    appel = calcul.appel_depuis_extraction(extraction, question)
+    if appel is None:
+        return None
+    nom, arguments = appel
+    resultat = executer(nom, arguments)
+    if "resultat" not in resultat:
+        return None
+    return {"outil": nom, "arguments": arguments, "resultat": resultat, "par": "code"}
+
+
 def generer(question: str, passages: Sequence[Chunk], scores: Sequence[float], llm) -> Reponse:
     """Passages deja choisis (et refus par seuil deja ecarte) : appel du LLM et mise en forme."""
-    sortie = llm.repondre(SYSTEME, message(question, passages), OUTILS, executer)
+    appel = calcul_par_le_code(question, llm)
+    texte_message = message(question, passages)
+    if appel:
+        # Le calcul est deja fait : on ne propose plus d'outil au modele, il ne peut que le reprendre.
+        texte_message += "\n\n" + calcul.bloc_pour_le_modele(appel)
+    sortie = llm.repondre(SYSTEME, texte_message, [] if appel else OUTILS, executer)
+    appels = ([appel] if appel else []) + sortie.appels
     # HORS_CORPUS n'importe ou : le modele ecrit parfois une reponse puis conclut qu'il ne sait pas.
     if not sortie.texte or HORS_CORPUS in sortie.texte:
-        return Reponse(MESSAGES_REFUS[langue_question(question)], True, "llm", appels_outils=sortie.appels)
-    cites = numeros_cites(sortie.texte)
+        return Reponse(MESSAGES_REFUS[langue_question(question)], True, "llm", appels_outils=appels)
+    texte = sortie.texte
+    montant = appel["resultat"]["resultat"]["montant"] if appel else None
+    if appel and not calcul.montant_present(texte, montant):
+        texte += "\n\n" + calcul.ligne_si_oubli(appel, langue_question(question))
+    cites = numeros_cites(texte)
     ids = [c.id for c in passages]
     return Reponse(
-        texte=sortie.texte,
+        texte=texte,
         refus=False,
         passages=[
             {"numero": i, "id": c.id, "article_id": c.article_id, "reference": reference(c),
@@ -49,8 +78,8 @@ def generer(question: str, passages: Sequence[Chunk], scores: Sequence[float], l
              "cite": i in cites}
             for i, (c, s) in enumerate(zip(passages, scores, strict=True), start=1)
         ],
-        appels_outils=sortie.appels,
-        citations_inventees=citations_inventees(sortie.texte, ids),
+        appels_outils=appels,
+        citations_inventees=citations_inventees(texte, ids),
     )
 
 

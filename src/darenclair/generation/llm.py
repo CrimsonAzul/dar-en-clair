@@ -37,7 +37,7 @@ class Ollama:
     reponses plus courtes et plus rapides ; OLLAMA_THINK=1 pour la garder."""
 
     def __init__(self, modele: str | None = None, url: str | None = None):
-        self.modele = modele or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+        self.modele = modele or os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
         self.url = (url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
         self.nom = f"ollama:{self.modele}"
         self._reflexion: bool | None = None
@@ -82,6 +82,23 @@ class Ollama:
                 messages.append({"role": "tool", "tool_name": nom, "content": json.dumps(resultat, ensure_ascii=False)})
         return Sortie(sans_pensee(self._chat(messages, [])["content"]), appels)
 
+    def extraire(self, systeme: str, texte: str, schema: dict) -> dict:
+        """Reponse JSON forcee par le schema (decodage contraint d'Ollama). {} si illisible.
+        Meme num_ctx que _chat : en changer obligerait Ollama a recharger le modele."""
+        corps = {
+            "model": self.modele, "stream": False, "format": schema,
+            "messages": [{"role": "system", "content": systeme}, {"role": "user", "content": texte}],
+            "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 256},
+        }
+        if self.sait_reflechir():
+            corps["think"] = False
+        contenu = sans_pensee(self._post("/api/chat", corps)["message"].get("content", ""))
+        try:
+            valeur = json.loads(contenu)
+        except json.JSONDecodeError:
+            return {}
+        return valeur if isinstance(valeur, dict) else {}
+
 
 class Gemini:
     def __init__(self, modele: str | None = None):
@@ -101,7 +118,7 @@ class Gemini:
                 types.FunctionDeclaration(name=o["name"], description=o["description"],
                                           parameters_json_schema=o["parameters"])
                 for o in outils
-            ])],
+            ])] if outils else None,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         contenus = [types.Content(role="user", parts=[types.Part.from_text(text=message)])]
@@ -122,6 +139,20 @@ class Gemini:
         config.tools = None
         r = self.client.models.generate_content(model=self.modele, contents=contenus, config=config)
         return Sortie((r.text or "").strip(), appels)
+
+    def extraire(self, systeme: str, texte: str, schema: dict) -> dict:
+        from google.genai import types
+
+        config = types.GenerateContentConfig(
+            system_instruction=systeme, temperature=0,
+            response_mime_type="application/json", response_json_schema=schema,
+        )
+        r = self.client.models.generate_content(model=self.modele, contents=texte, config=config)
+        try:
+            valeur = json.loads(r.text or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return valeur if isinstance(valeur, dict) else {}
 
 
 def choisir_llm():

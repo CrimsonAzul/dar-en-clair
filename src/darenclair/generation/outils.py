@@ -26,11 +26,9 @@ OUTILS = [
                 "coefficient_reevaluation": {**_NOMBRE, "description": "coefficient de l'annee d'achat, 1 si inconnu"},
                 "interets_pret": {**_NOMBRE, "description": "interets d'emprunt payes pour l'achat"},
                 "frais_cession": {**_NOMBRE, "description": "frais de vente justifies (courtage, annonces)"},
-                "exoneration": {
-                    "type": "string",
-                    "enum": sorted(fiscal.EXONERATIONS),
-                    "description": "article d'exoneration si les conditions sont remplies (63-II-B : habitation principale depuis 5 ans)",
-                },
+                # Pas d'exoneration ici : sur dev, un modele a applique l'exoneration de
+                # l'habitation principale a la vente d'un terrain. Ses conditions se discutent
+                # dans la reponse, avec l'article 63, pas dans un parametre d'outil.
             },
             "required": ["prix_cession", "prix_acquisition"],
         },
