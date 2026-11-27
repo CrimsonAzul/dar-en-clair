@@ -22,6 +22,21 @@ python -m darenclair.evaluation.generation --split test
 
 Les sorties detaillees (classements, reponses completes) vont dans `eval/results/`, non versionne.
 
+## Jeu externe : 30 questions ecrites hors du projet
+
+`questions_externes.jsonl`, meme format, `split` = `externe`. Origine, telle que je la connais : environ la moitie vient de proches, que j'ai ensuite nettoyees, mises en forme et parfois traduites (francais, anglais, darija) ; les autres ont ete redigees avec une IA, puis reformulees pour sonner plus naturel. Ce ne sont donc pas des messages d'usagers recopies tels quels, et je ne les presente pas comme tels. Leur interet : elles ont ete ecrites sans voir aucun texte de loi et sans rien savoir du moteur. 11 sont en anglais, 10 en darija, 9 en francais (champ `variete` pour la darija).
+
+Les articles ont ete trouves ensuite en lisant les textes, jamais avec les resultats du moteur. 22 questions ont une reponse dans le corpus, 8 sont des pieges (verification d'un titre foncier, achat par un etranger, prix d'un loyer, agence ou non, assurance, Airbnb ou non, demarches d'heritage, occupant sans droit), chacun avec une note qui dit pourquoi.
+
+S'y ajoutent 5 questions que j'ai ecrites moi-meme, recopiees sans aucune retouche (`origine` = `auteur_sans_retouche`), dont 3 en darija en lettres latines, fautes comprises ("chno ndir ila mabghach l kari ikhrj lia mn dar?"). Ce sont les plus proches de vrais messages ; elles sont trop peu nombreuses pour un chiffre a part, mais leurs reponses sont lues une a une.
+
+Ce jeu ne sert a regler rien : il est lance une seule fois par configuration retenue, apres dev et test. Un vrai jeu d'usagers (messages de plusieurs personnes, recopies sans aucune retouche) reste a faire.
+
+```bash
+python -m darenclair.evaluation.recherche --split externe     # seuil de refus relu, pas de reglage
+python -m darenclair.evaluation.generation --split externe
+```
+
 | Champ | Valeurs |
 |---|---|
 | `type` | `mono` (60), `multi` (25, au moins deux textes), `piege` (15, la bonne reponse est un refus) |

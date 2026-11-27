@@ -15,23 +15,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import time
 from dataclasses import asdict
 from pathlib import Path
 
 from darenclair.evaluation.metrics import bootstrap_ic, citation_precision, citation_rappel
+from darenclair.generation.calcul import montant_present
 from darenclair.generation.llm import choisir_llm
 from darenclair.generation.repondre import generer, refus_seuil
 from darenclair.ingest.corpus import charger_chunks
 
 RACINE = Path(__file__).resolve().parents[3]
-
-
-def montant_present(texte: str, montant: float) -> bool:
-    """36 000, 36.000, 36,000 ou 36000 : on compare les nombres sans separateurs de milliers."""
-    nombres = {re.sub(r"[\s .,]", "", m) for m in re.findall(r"\d[\d\s .,]*\d|\d", texte)}
-    return str(int(montant)) in nombres
 
 
 def calcul_correct(resultat: dict) -> bool:
@@ -48,15 +42,17 @@ def calcul_correct(resultat: dict) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--split", choices=["dev", "test"], required=True)
-    ap.add_argument("--questions", type=Path, default=RACINE / "eval" / "questions.jsonl")
+    ap.add_argument("--split", choices=["dev", "test", "externe"], required=True)
+    ap.add_argument("--questions", type=Path, help="par defaut eval/questions.jsonl, ou eval/questions_externes.jsonl pour --split externe")
     ap.add_argument("--n", type=int, default=5, help="passages donnes au LLM")
     a = ap.parse_args()
 
     recherche = json.loads((RACINE / "eval" / "results" / f"recherche_{a.split}.json").read_text(encoding="utf-8"))
     seuil = recherche["seuil_refus"]
     contextes = {d["id"]: d for d in recherche["questions"]}
-    questions = [json.loads(l) for l in a.questions.read_text(encoding="utf-8").splitlines() if l.strip()]
+    fichier = a.questions or RACINE / "eval" / (
+        "questions_externes.jsonl" if a.split == "externe" else "questions.jsonl")
+    questions = [json.loads(l) for l in fichier.read_text(encoding="utf-8").splitlines() if l.strip()]
     questions = [q for q in questions if q["split"] == a.split]
     chunks = {c.id: c for c in charger_chunks()}
     llm = choisir_llm()

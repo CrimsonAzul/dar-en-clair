@@ -81,7 +81,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--adaptateur", type=Path, default=RACINE / "models" / "bge-m3-lora")
     ap.add_argument("--questions", type=Path, default=RACINE / "data" / "finetune" / "val.jsonl")
-    ap.add_argument("--split", choices=["dev", "test"], help="pour eval/questions.jsonl")
+    ap.add_argument("--split", choices=["dev", "test", "externe"], help="pour eval/questions.jsonl ou questions_externes.jsonl")
     a = ap.parse_args()
 
     chunks = charger_chunks()

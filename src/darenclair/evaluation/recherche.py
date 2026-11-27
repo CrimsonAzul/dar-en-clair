@@ -60,11 +60,13 @@ def ligne_ic(valeurs: list[float | None]) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--split", choices=["dev", "test"], required=True)
-    ap.add_argument("--questions", type=Path, default=RACINE / "eval" / "questions.jsonl")
+    ap.add_argument("--split", choices=["dev", "test", "externe"], required=True)
+    ap.add_argument("--questions", type=Path, help="par defaut eval/questions.jsonl, ou eval/questions_externes.jsonl pour --split externe")
     a = ap.parse_args()
 
-    questions = [json.loads(l) for l in a.questions.read_text(encoding="utf-8").splitlines() if l.strip()]
+    fichier = a.questions or RACINE / "eval" / (
+        "questions_externes.jsonl" if a.split == "externe" else "questions.jsonl")
+    questions = [json.loads(l) for l in fichier.read_text(encoding="utf-8").splitlines() if l.strip()]
     questions = [q for q in questions if q["split"] == a.split]
     adaptateur = adaptateur_configure()
 
