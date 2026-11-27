@@ -1,6 +1,6 @@
 # Dar en Clair
 
-**In English.** Dar en Clair is a question answering assistant on Moroccan real estate law: renting, buying and selling, property tax and co-ownership. It searches 7 official texts (1,523 article-level chunks, French and Arabic), answers with numbered citations that link back to the exact articles, refuses when the texts do not cover the question, and leaves tax amounts to tested Python code instead of the language model. Retrieval is bge-m3 with a LoRA adapter I fine-tuned on a 6 GB laptop GPU, exact search in pgvector, then the bge-reranker-v2-m3 cross-encoder. The main numbers come from a separate 100-question set (drafted with an AI assistant, then checked against the law texts) split into dev, used for every tuning decision, and test, run once per configuration, with bootstrap confidence intervals. On the 51 test questions that have a source, the shipped pipeline (dense + reranker) reaches recall@5 0.578 and MRR 0.608. At this sample size the reranker's gain over dense search alone is not significant, and fusing BM25 through RRF clearly hurts (recall@5 -0.144). With a small local model (qwen2.5:7b through Ollama), the assistant refuses 8 of 9 trap questions and never cites a passage that does not exist, but it is over-cautious: it answers only 29 of the 51 test questions it should answer, and most questions in Arabic or English. Stack: Python, PyTorch, sentence-transformers, PEFT, PostgreSQL + pgvector, FastAPI, Next.js, Gemini or a local model through Ollama. Answers are informative only, not legal advice.
+**In English.** Dar en Clair is a question answering assistant on Moroccan real estate law: renting, buying and selling, property tax and co-ownership. It searches 7 official texts (1,523 article-level chunks, French and Arabic), answers with numbered citations that link back to the exact articles, refuses when the texts do not cover the question, and leaves tax amounts to tested Python code instead of the language model. Retrieval is bge-m3 with a LoRA adapter I fine-tuned on a 6 GB laptop GPU, exact search in pgvector, then the bge-reranker-v2-m3 cross-encoder. The main numbers come from a separate 100-question set (drafted with an AI assistant, then checked against the law texts) split into dev, used for every tuning decision, and test, run once per configuration, with bootstrap confidence intervals. On the 51 test questions that have a source, the shipped pipeline (dense + reranker) reaches recall@5 0.578 and MRR 0.608. At this sample size the reranker's gain over dense search alone is not significant, and fusing BM25 through RRF clearly hurts (recall@5 -0.144). With a small local model (qwen2.5:7b through Ollama), the assistant refuses 8 of 9 trap questions and never cites a passage that does not exist, but it is over-cautious: it answers only 29 of the 51 test questions it should answer, and most questions in Arabic or English. Five free local models were compared on dev; none wins on every criterion. Stack: Python, PyTorch, sentence-transformers, PEFT, PostgreSQL + pgvector, FastAPI, Next.js, Gemini or a local model through Ollama. Answers are informative only, not legal advice.
 
 ---
 
@@ -119,10 +119,29 @@ LLM : qwen2.5:7b en local via Ollama (pas de cle Gemini sur la machine de test).
 Ce que ca montre :
 - Le seuil sur le score du reranker refuse peu de pieges : les pieges proches d'un texte du corpus ont des scores aussi hauts que de vraies questions. C'est le LLM qui fait l'essentiel du tri. Le seul piege non refuse (q090, aide de l'Etat pour un premier logement) tombe sur l'article 247 du CGI (logement social et a faible valeur immobiliere) : le modele a presente ces regimes fiscaux comme s'ils etaient l'aide directe.
 - Le defaut principal est l'exces de prudence : 20 questions normales refusees par le LLM. Pour 9 d'entre elles, aucun article attendu n'etait dans les 5 passages (refus justifie, la faute est a la recherche) ; pour les 11 autres, l'article etait la. Les questions sur plusieurs textes sont les plus touchees (12 refusees sur 15) : le modele refuse des qu'une partie de la question n'est pas couverte.
-- Les questions en arabe et en anglais passent mal avec ce modele : 3 sur 7 et 1 sur 5 repondues sur test, contre 25 sur 39 en francais. La recherche multilingue n'est pas seule en cause : qwen2.5:7b refuse plus souvent et repond parfois en francais a une question en anglais. C'est le premier point a verifier avec Gemini.
+- Les questions en arabe et en anglais passent mal avec ce modele : 3 sur 7 et 1 sur 5 repondues sur test, contre 25 sur 39 en francais. La recherche multilingue n'est pas seule en cause : qwen2.5:7b refuse plus souvent et repond parfois en francais a une question en anglais. Sur dev, qwen3.5:9b repond aux 4 questions en arabe (comparaison des modeles plus bas).
 - Pas de juge LLM pour la fidelite des reponses : il faudrait d'abord le valider sur 20 reponses notees a la main. En lisant les reponses, on trouve encore des erreurs de fond (par exemple une augmentation de loyer "plus frequente si les parties sont d'accord", que l'article 32 de la loi 67-12 interdit).
 
 Calculs (jeu dev, les 4 questions chiffrees y sont toutes) : apres une revision du prompt sur dev, le modele appelle le bon outil pour les 4 (4 800, 36 000, 30 000 et 40 000 DH, tous corrects). Avant la revision, il calculait lui-meme ou se trompait d'outil : aucun des 4 montants ne sortait du bon outil. Un calcul compte comme correct seulement si un outil a renvoye le montant attendu et que ce montant est dans la reponse (le nombre seul dans le texte peut etre un hasard). La revision (qui paie quel impot dans la description des outils, verifier que les passages parlent de la meme situation, HORS_CORPUS accepte n'importe ou dans la reponse) a ete faite une seule fois, sur dev : pieges refuses de 4/6 a 6/6, questions normales repondues de 28/34 a 24/34.
+
+### Quel LLM local ? (jeu dev, 40 questions)
+
+Cinq modeles libres, avec le meme prompt, les memes outils et les memes passages, sur le jeu dev seulement : le test reste reserve au modele retenu. Tous tournent via Ollama sur le GPU de 6 Go (la reflexion des Qwen3.5 est coupee).
+
+| Modele | Pieges refuses | Questions normales repondues | Precision des citations | Rappel des citations | Calculs corrects | Arabe / anglais repondues | s par question |
+|---|---|---|---|---|---|---|---|
+| qwen2.5:7b (par defaut) | 6/6 | 24/34 | 0.44 | 0.65 | 4/4 | 2/4, 3/3 | 10 |
+| qwen3.5:4b | 6/6 | 23/34 | 0.46 | 0.75 | 1/4 | 2/4, 3/3 | 7.5 |
+| qwen3.5:9b | 4/6 | 32/34 | 0.49 | 0.70 | 1/4 | 4/4, 3/3 | 27 |
+| command-r7b | 5/6 | 25/34 | 0.09 | 0.22 | 0/4 | 3/4, 1/3 | 32 |
+| ministral-3:8b | 5/6 | 18/34 | 0.60 | 0.68 | 0/4 | 4/4, 2/3 | 29 |
+
+Lecture :
+- Aucun ne gagne partout. qwen2.5:7b reste le modele par defaut : tous les pieges refuses, et les 4 calculs passent par le bon outil.
+- qwen3.5:9b repond a presque tout (32 sur 34), arabe compris, mais laisse passer 2 pieges et n'appelle presque jamais les outils de calcul. Il est aussi le plus lent des Qwen : une partie du modele ne tient pas dans les 6 Go et tourne sur le processeur.
+- ministral-3:8b cite le plus juste, mais refuse plus de la moitie des questions en francais (15 sur 27).
+- command-r7b ecrit "loi 67-12, article 19" au lieu de [S1] dans 14 reponses sur 25 : ces references ne peuvent pas etre verifiees, et il n'appelle aucun outil. Il est entraine pour le format RAG propre a Cohere, que sa version Ollama n'utilise pas.
+- Avec 40 questions, un ecart de 2 ou 3 questions n'est pas significatif. Piste suivante : faire decider par le code, et non par le modele, qu'une question demande un calcul ; le 9B deviendrait alors le meilleur candidat.
 
 ## Fine-tuning LoRA de bge-m3 (GPU de 6 Go)
 
