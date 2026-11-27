@@ -59,7 +59,8 @@ class Ollama:
         corps = {
             "model": self.modele, "messages": messages, "stream": False,
             "tools": [{"type": "function", "function": o} for o in outils],
-            "options": {"temperature": 0, "num_ctx": 8192},
+            # num_predict : une reponse fait 150 mots au plus ; la limite coupe un modele qui s'emballe.
+            "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 1024},
         }
         if self.sait_reflechir():
             corps["think"] = os.getenv("OLLAMA_THINK", "") == "1"

@@ -62,7 +62,7 @@ def main() -> None:
     llm = choisir_llm()
     print(f"{len(questions)} questions ({a.split}), LLM {llm.nom}, seuil de refus {seuil:.4f}")
 
-    resultats = []
+    resultats, erreurs = [], []
     debut = time.time()
     for q in questions:
         ctx = contextes[q["id"]]
@@ -70,7 +70,16 @@ def main() -> None:
             rep = refus_seuil(q["question"])
         else:
             ids = ctx["candidats"][: a.n]
-            rep = generer(q["question"], [chunks[i] for i in ids], ctx["scores_reranker"][: a.n], llm)
+            rep = None
+            for essai in (1, 2):  # un appel bloque (GPU partage, modele qui s'emballe) : on reessaie une fois
+                try:
+                    rep = generer(q["question"], [chunks[i] for i in ids], ctx["scores_reranker"][: a.n], llm)
+                    break
+                except OSError as e:  # delai depasse ou serveur injoignable
+                    print(f"  {q['id']} essai {essai} en echec : {type(e).__name__}", flush=True)
+            if rep is None:
+                erreurs.append(q["id"])  # exclue des mesures, signalee dans le resume
+                continue
         cites = {p["article_id"] for p in rep.passages if p["cite"]}
         resultats.append({
             "id": q["id"], "type": q["type"], "langue": q["langue"], "question": q["question"],
@@ -83,7 +92,9 @@ def main() -> None:
     pieges = [r for r in resultats if not r["sources"]]
     normaux = [r for r in resultats if r["sources"]]
     repondus = [r for r in normaux if not r["reponse"]["refus"]]
-    print(f"\n== {llm.nom}, {a.split} ({duree / len(resultats):.1f} s par question)")
+    print(f"\n== {llm.nom}, {a.split} ({duree / max(len(questions), 1):.1f} s par question)")
+    if erreurs:
+        print(f"  ATTENTION : {len(erreurs)} question(s) sans reponse du LLM, exclues des mesures : {erreurs}")
     print(f"  pieges refuses              : {sum(r['reponse']['refus'] for r in pieges)}/{len(pieges)}"
           f"  (dont par le LLM : {sum(r['reponse']['motif_refus'] == 'llm' for r in pieges)})")
     print(f"  questions normales repondues : {len(repondus)}/{len(normaux)}"
