@@ -1,12 +1,14 @@
 # Dar en Clair
 
-**In English.** Dar en Clair is a question answering assistant on Moroccan real estate law: renting, buying and selling, property tax and co-ownership. It searches 7 official texts (1,523 article-level chunks, French and Arabic), answers with numbered citations that link back to the exact articles, refuses when the texts do not cover the question, and leaves tax amounts to tested Python code instead of the language model. Retrieval is bge-m3 with a LoRA adapter I fine-tuned on a 6 GB laptop GPU, exact search in pgvector, then the bge-reranker-v2-m3 cross-encoder. The main numbers come from a separate 100-question set (drafted with an AI assistant, then checked against the law texts) split into dev, used for every tuning decision, and test, run once per configuration, with bootstrap confidence intervals. On the 51 test questions that have a source, the shipped pipeline (dense + reranker) reaches recall@5 0.578 and MRR 0.608. At this sample size the reranker's gain over dense search alone is not significant, and fusing BM25 through RRF clearly hurts (recall@5 -0.144). With a small local model (qwen2.5:7b through Ollama), the assistant refuses 8 of 9 trap questions and never cites a passage that does not exist, but it is over-cautious: it answers only 29 of the 51 test questions it should answer, and most questions in Arabic or English. Five free local models were compared on dev; none wins on every criterion. Stack: Python, PyTorch, sentence-transformers, PEFT, PostgreSQL + pgvector, FastAPI, Next.js, Gemini or a local model through Ollama. Answers are informative only, not legal advice.
+**In English.** Dar en Clair is a question answering assistant on Moroccan real estate law: renting, buying and selling, property tax and co-ownership. It searches 7 official texts (1,523 article-level chunks, French and Arabic), answers with numbered citations that link back to the exact articles, refuses when the texts do not cover the question, and leaves tax amounts to tested Python code instead of the language model. Retrieval is bge-m3 with a LoRA adapter I fine-tuned on a 6 GB laptop GPU, exact search in pgvector, then the bge-reranker-v2-m3 cross-encoder. The main numbers come from a separate 100-question set (drafted with an AI assistant, then checked against the law texts) split into dev, used for every tuning decision, and test, run once per configuration, with bootstrap confidence intervals. On the 51 test questions that have a source, the shipped pipeline (dense + reranker) reaches recall@5 0.578 and MRR 0.608. At this sample size the reranker's gain over dense search alone is not significant, and fusing BM25 through RRF clearly hurts (recall@5 -0.144). The answering model runs locally: qwen3.5:9b, picked among five free models on dev with a rule fixed before seeing its results. Tax amounts are decided and computed by code, not left to the model. On the test set it gives a useful answer (one that cites at least one expected article) to 35 of 51 questions, up from 23 with the previous setup, refuses 7 of 9 trap questions and never cites a passage that does not exist. On 35 questions written outside the project, including Moroccan Darija, it does poorly: Darija is not handled yet, and that is stated as such. Stack: Python, PyTorch, sentence-transformers, PEFT, PostgreSQL + pgvector, FastAPI, Next.js, Gemini or a local model through Ollama. Answers are informative only, not legal advice.
 
 ---
 
 Assistant de questions-reponses sur l'immobilier au Maroc : location, vente, fiscalite immobiliere et copropriete. Il repond en citant les articles de loi utilises, refuse quand le corpus ne couvre pas la question, et confie les calculs d'impots a du code Python teste plutot qu'au modele.
 
 > Reponses informatives, pas un conseil juridique ou fiscal.
+
+![Interface : question, reponse avec citation, montant calcule par le code, article cite](docs/interface.png)
 
 ## Corpus
 
@@ -33,8 +35,11 @@ question -> bge-m3 + LoRA -> pgvector (recherche exacte) -> 30 candidats
                                          | non
                            5 passages numerotes [S1]..[S5]
                                          |
-              outils fiscaux (Python) <-- LLM --> reponse + citations [S2]
-                                                  -> "Loi 67-12, art. 34"
+   chiffre dans la question ? -> extraction JSON a format impose (LLM)
+                              -> montants verifies par le code -> outil fiscal (Python)
+                                         |
+                       LLM --> reponse + citations [S2] (+ montant ajoute s'il l'oublie)
+                                         -> "Loi 67-12, art. 34"
               LLM qui juge les passages insuffisants -> HORS_CORPUS -> refus
 ```
 
@@ -45,7 +50,7 @@ Choix et raisons :
 - **Reranker sur les 30 candidats denses** : la variante la plus simple et la meilleure sur dev (reclasser l'union dense + BM25 donnait un MRR plus bas). Sur test, son gain sur le dense seul n'est pas significatif ; son score sert aussi au refus.
 - **Refus a deux niveaux** : un seuil sur le score du reranker, choisi sur dev, puis le LLM qui doit repondre HORS_CORPUS si les passages ne repondent pas. Un LLM seul repond presque toujours quelque chose.
 - **Citations par numero de passage** ([S2]) puis conversion en article : pas de reference inventee ou mal recopiee. Un numero hors liste est compte comme citation inventee.
-- **Calculs dans du code** : taux dans `config/fiscal_2026.yaml`, relus dans le PDF du CGI avec l'article et la page. Une section avec une valeur manquante est refusee par l'outil (frais de conservation fonciere et de notaire : pas de source officielle dans le corpus).
+- **Calculs dans du code, et decides par le code** : taux dans `config/fiscal_2026.yaml`, relus dans le PDF du CGI avec l'article et la page. Le modele ne choisit plus s'il faut un outil : sur dev, les petits modeles l'oubliaient ou prenaient le mauvais. Il remplit seulement un JSON a format impose (quel calcul, quels montants) ; le code verifie que chaque montant figure dans la question, fait les conversions (loyer mensuel x 12), appelle l'outil et ajoute le montant si la reponse l'oublie. Les exonerations ne sont jamais deduites par un outil : sur dev, un modele avait applique celle de l'habitation principale a la vente d'un terrain.
 - **Corpus multilingue sans traduction** : chaque texte est indexe dans sa meilleure version (la loi 47-06 consolidee n'existe qu'en arabe). bge-m3 et le reranker sont multilingues : une question en francais, arabe ou anglais trouve l'article quelle que soit sa langue. Le LLM repond dans la langue de la question ; l'article cite est montre tel quel.
 - **PDF difficiles** : notes de bas de page reperees par la taille de police, en-tetes par leur position, sommaires et annexes ecartes, OCR Tesseract pour les scans, ligatures arabes lam-alef reparees grace a la largeur nulle de l'alef dans le glyphe.
 
@@ -55,7 +60,7 @@ Choix et raisons :
 python -m venv .venv && .venv\Scripts\activate
 pip install torch --index-url https://download.pytorch.org/whl/cu126   # ou /cpu
 pip install -e ".[ml,dev]"
-cp .env.example .env                 # GEMINI_API_KEY, sinon Ollama en local (ollama pull qwen2.5:7b)
+cp .env.example .env                 # GEMINI_API_KEY, sinon Ollama en local (ollama pull qwen3.5:9b)
 docker compose up -d db
 python -m darenclair.ingest.corpus   # decoupe les PDF de data/raw selon config/corpus.yaml
                                      # PDF scannes : OCR Tesseract + modele fra de tessdata_best dans .tessdata/
@@ -68,7 +73,7 @@ pytest
 Changer de LLM local : `OLLAMA_MODEL` dans `.env` (ou dans le terminal avant de lancer l'API ou une evaluation), par exemple sous PowerShell :
 
 ```powershell
-$env:LLM_PROVIDER="ollama"; $env:OLLAMA_MODEL="qwen3.5:4b"
+$env:LLM_PROVIDER="ollama"; $env:OLLAMA_MODEL="qwen2.5:7b"   # plus rapide, refuse plus souvent
 uvicorn darenclair.api.main:app --port 8000
 python -m darenclair.evaluation.generation --split dev   # memes mesures que le tableau, pour ce modele
 ```
@@ -102,9 +107,26 @@ Ecarts apparies sur test (IC a 95 %) :
 
 Le chemin livre a ete choisi sur dev (34 questions), avant de lancer le test : dense + reranker y avait le meilleur MRR (0.689, contre 0.650 pour hybride + reranker et 0.636 pour dense seul), sans ecart significatif. Sur test, dense seul fait aussi bien. Je n'ai rien change apres avoir vu ces chiffres : ce serait regler sur le test.
 
-### Refus et generation (jeu test, 60 questions)
+### Refus et generation (jeu test, 60 questions) : version actuelle
 
-LLM : qwen2.5:7b en local via Ollama (pas de cle Gemini sur la machine de test). C'est un petit modele : ces chiffres sont un plancher. Le meme script tourne avec Gemini des qu'une cle est dans `.env`.
+LLM local via Ollama (pas de cle Gemini sur la machine de test) : qwen3.5:9b, calculs decides par le code. Modele et methode choisis sur dev avant ce passage, avec une regle fixee avant de voir ses resultats (section "Quel LLM local ?"). Un seul passage sur test.
+
+| Jeu test | Avant : qwen2.5:7b | Maintenant : qwen3.5:9b, calculs par le code |
+|---|---|---|
+| Reponses utiles (au moins un article attendu cite) | 23 / 51 | **35 / 51** |
+| Questions normales repondues | 29 / 51 | 48 / 51 |
+| Pieges refuses (seuil du reranker + LLM) | 8 / 9 | 7 / 9 |
+| Precision des citations, sur les reponses donnees | 0.609 [0.460, 0.753] | 0.434 [0.330, 0.542] |
+| Rappel des citations, sur les reponses donnees | 0.678 [0.523, 0.816] | 0.583 [0.465, 0.701] |
+| Citations inventees | 0 | 0 |
+| Reponses sans aucune citation | 1 / 29 | 0 / 48 |
+| Questions en arabe / en anglais repondues | 3/7, 1/5 | 6/7, 4/5 |
+
+Le 9B repond a presque tout, ce qui fait monter les reponses utiles de 23 a 35. La precision des citations baisse parce qu'il repond aussi aux questions difficiles que l'ancien modele refusait. Il laisse passer un piege de plus. Les 4 calculs de dev passent par le bon outil avec les deux modeles depuis que le code les decide (le test n'a pas de question chiffree).
+
+### Refus et generation (jeu test) : version precedente, qwen2.5:7b
+
+C'est un petit modele : ces chiffres sont un plancher. Le meme script tourne avec Gemini des qu'une cle est dans `.env`.
 
 | | Jeu test |
 |---|---|
@@ -130,18 +152,46 @@ Cinq modeles libres, avec le meme prompt, les memes outils et les memes passages
 
 | Modele | Pieges refuses | Questions normales repondues | Precision des citations | Rappel des citations | Calculs corrects | Arabe / anglais repondues | s par question |
 |---|---|---|---|---|---|---|---|
-| qwen2.5:7b (par defaut) | 6/6 | 24/34 | 0.44 | 0.65 | 4/4 | 2/4, 3/3 | 10 |
+| qwen2.5:7b | 6/6 | 24/34 | 0.44 | 0.65 | 4/4 | 2/4, 3/3 | 10 |
 | qwen3.5:4b | 6/6 | 23/34 | 0.46 | 0.75 | 1/4 | 2/4, 3/3 | 7.5 |
 | qwen3.5:9b | 4/6 | 32/34 | 0.49 | 0.70 | 1/4 | 4/4, 3/3 | 27 |
 | command-r7b | 5/6 | 25/34 | 0.09 | 0.22 | 0/4 | 3/4, 1/3 | 32 |
 | ministral-3:8b | 5/6 | 18/34 | 0.60 | 0.68 | 0/4 | 4/4, 2/3 | 29 |
+| qwen2.5:7b, calculs par le code | 6/6 | 25/34 | 0.48 | 0.51 | 4/4 | 2/4, 3/3 | 9 |
+| **qwen3.5:9b, calculs par le code (retenu)** | 5/6 | 34/34 | 0.41 | 0.65 | 4/4 | 4/4, 3/3 | 30 |
 
 Lecture :
-- Aucun ne gagne partout. qwen2.5:7b reste le modele par defaut : tous les pieges refuses, et les 4 calculs passent par le bon outil.
-- qwen3.5:9b repond a presque tout (32 sur 34), arabe compris, mais laisse passer 2 pieges et n'appelle presque jamais les outils de calcul. Il est aussi le plus lent des Qwen : une partie du modele ne tient pas dans les 6 Go et tourne sur le processeur.
+- Sans aide, aucun ne gagne partout : qwen2.5:7b refuse tous les pieges et fait les 4 calculs, mais refuse 10 questions sur 34 ; qwen3.5:9b repond a presque tout, arabe compris, mais n'appelle presque jamais les outils de calcul.
+- Une fois les calculs decides par le code, cette faiblesse du 9B disparait (4 sur 4). Regle fixee avant de voir ses resultats : le 9B est retenu s'il fait les 4 calculs, refuse au moins 5 pieges sur 6 et repond a plus de questions que le 7B. Il remplit les trois. Il est aussi le plus lent : une partie du modele ne tient pas dans les 6 Go et tourne sur le processeur.
+- Premier essai de l'extraction : le 9B laissait tomber le prix pour les droits d'enregistrement (2 calculs sur 4). Corrige sur dev en rendant tous les champs du JSON obligatoires, puis les deux modeles ont ete relances.
 - ministral-3:8b cite le plus juste, mais refuse plus de la moitie des questions en francais (15 sur 27).
 - command-r7b ecrit "loi 67-12, article 19" au lieu de [S1] dans 14 reponses sur 25 : ces references ne peuvent pas etre verifiees, et il n'appelle aucun outil. Il est entraine pour le format RAG propre a Cohere, que sa version Ollama n'utilise pas.
-- Avec 40 questions, un ecart de 2 ou 3 questions n'est pas significatif. Piste suivante : faire decider par le code, et non par le modele, qu'une question demande un calcul ; le 9B deviendrait alors le meilleur candidat.
+- Avec 40 questions, un ecart de 2 ou 3 questions n'est pas significatif.
+
+### Jeu externe : 35 questions ecrites hors du projet
+
+Origine detaillee dans [eval/README.md](eval/README.md) : 30 questions en partie venues de proches (nettoyees, parfois traduites), en partie redigees avec une IA, plus 5 que j'ai ecrites sans aucune retouche, dont 3 en darija en lettres latines. 12 en anglais, 13 en darija, 10 en francais ; 27 avec une reponse dans le corpus, 8 pieges. Un seul passage, avec la configuration retenue, rien regle dessus.
+
+| Jeu externe | Resultat |
+|---|---|
+| Recherche dense seule, recall@5 | 0.296 [0.160, 0.451] |
+| Recherche livree (dense + reranker), recall@5 | 0.148 [0.062, 0.265] |
+| Questions normales repondues | 14 / 27 (les 13 autres bloquees par le seuil du reranker) |
+| Reponses utiles (au moins un article attendu cite) | 4 / 27 |
+| Pieges refuses | 3 / 8 |
+| Citations inventees | 0 |
+
+| recall@5 par langue | Dense seule | Dense + reranker |
+|---|---|---|
+| anglais (8) | 0.48 | 0.25 |
+| francais (7) | 0.50 | 0.14 |
+| darija, lettres arabes (9) | 0.07 | 0.11 |
+| darija, lettres latines (3) | 0 | 0 |
+
+Ce que ca montre, sans rien corriger sur ce jeu :
+- **La darija n'est pas geree.** bge-m3 la comprend a peine, le reranker lui donne des scores minuscules et le seuil la refuse : aucune des 12 questions en darija n'obtient de reponse, dont mes 3 questions en lettres latines ("chno ndir ila mabghach l kari ikhrj lia mn dar?").
+- **Sur un langage vraiment courant, le reranker nuit** : il fait sortir l'article attendu du top 5 (recall@5 divise par deux), alors que sur le jeu test redige avec une IA il ne changeait rien de mesurable. Le seuil de refus, choisi sur ses scores, en souffre aussi.
+- Pistes, a regler sur un nouveau jeu dev qui contient de la darija : reecrire la question en francais avant la recherche (essaye dans un autre projet, ou la darija passe de 1 a 4 sur 4 en dev), et revoir le role du reranker.
 
 ## Fine-tuning LoRA de bge-m3 (GPU de 6 Go)
 
@@ -178,7 +228,7 @@ Le LoRA fait entrer plus d'articles pertinents dans le top 5 (+0.078, significat
 
 ## Calculs fiscaux
 
-`src/darenclair/tools/fiscal.py`, appeles par le LLM comme outils :
+`src/darenclair/tools/fiscal.py`, appeles par le code quand la question contient un montant (`src/darenclair/generation/calcul.py`), sinon proposes au LLM comme outils :
 - impot sur le profit immobilier : forfait de 15 % de frais d'acquisition sauf frais justifies superieurs, reevaluation du prix augmente des frais, investissements et interets (art. 65), taux de 20 % (73-II-F-6°), minimum de 3 % du prix (144-II-1°), cas de l'habitation principale au-dela de 4 MDH (144-II-2°) ;
 - impot sur les loyers : 10 % du brut annuel sous 120 000 DH, 15 % au-dela (73-II-B-5° et C-4°) ;
 - droits d'enregistrement : 4 % pour un local construit, 5 % pour un terrain nu (133-I-F et G).
@@ -194,6 +244,9 @@ Chaque taux vient du PDF officiel du CGI 2026, avec l'article et la page dans la
 - [x] Recherche mesuree sur test (6 configurations)
 - [x] Generation avec citations et outils fiscaux, mesuree sur dev et test
 - [x] API FastAPI, interface Next.js
-- [ ] Remplacer 20 a 30 questions par des questions de vrais utilisateurs
+- [x] Cinq LLM locaux compares sur dev, calculs decides par le code, qwen3.5:9b retenu puis mesure sur test
+- [x] Jeu externe de 35 questions ecrites hors du projet, dont 5 sans retouche
+- [ ] Gerer la darija (reecriture de la question avant la recherche), a regler sur un dev qui en contient
+- [ ] Un vrai jeu d'usagers : messages de plusieurs personnes, recopies sans aucune retouche
 - [ ] Juge LLM pour la fidelite des reponses, valide sur 20 reponses notees a la main
 - [ ] Traduction a la demande des articles cites dans une autre langue que la question
